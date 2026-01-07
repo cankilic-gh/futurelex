@@ -9,6 +9,39 @@ import { UserSavedWord, Word } from '../types';
 import { Trash2, BookMarked, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Cache configuration
+const CACHE_KEY_DASHBOARD = 'futurelex_dashboard_words_cache';
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Cache utility functions
+function getCachedWords(): { words: UserSavedWord[], timestamp: number } | null {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY_DASHBOARD);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return { words: parsed.words || [], timestamp: parsed.timestamp || 0 };
+  } catch (err) {
+    console.error('[CACHE] Error reading dashboard cache:', err);
+    return null;
+  }
+}
+
+function setCachedWords(words: UserSavedWord[]): void {
+  try {
+    const data = {
+      words,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(CACHE_KEY_DASHBOARD, JSON.stringify(data));
+  } catch (err) {
+    console.error('[CACHE] Error writing dashboard cache:', err);
+  }
+}
+
+function isCacheValid(timestamp: number): boolean {
+  return Date.now() - timestamp < CACHE_TTL;
+}
+
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -19,6 +52,18 @@ export const Dashboard: React.FC = () => {
     if (!user) return;
 
     const fetchWords = async () => {
+      // PROGRESSIVE LOADING: Load from cache first for instant display
+      const cached = getCachedWords();
+      let useCache = false;
+
+      if (cached && isCacheValid(cached.timestamp)) {
+        setSavedWords(cached.words);
+        setLoading(false); // Show words immediately
+        useCache = true;
+        console.log('[CACHE] Using cached dashboard words:', { count: cached.words.length });
+      }
+
+      // Fetch from Firebase in background (always fetch to keep cache fresh)
       try {
         const q = query(collection(db, 'users', user.uid, 'saved_words'));
         const querySnapshot = await getDocs(q);
@@ -26,11 +71,24 @@ export const Dashboard: React.FC = () => {
           id: doc.id,
           ...doc.data()
         })) as UserSavedWord[];
+        
+        console.log('[FETCH] Loaded dashboard words from Firebase:', { count: words.length });
+        
+        // Update cache
+        setCachedWords(words);
+        
+        // Update state with fresh data
         setSavedWords(words);
+        
+        if (!useCache) {
+          setLoading(false);
+        }
       } catch (err) {
         console.error("Failed to fetch saved words", err);
-      } finally {
-        setLoading(false);
+        // If cache was used, we already showed words, so just log error
+        if (!useCache) {
+          setLoading(false);
+        }
       }
     };
 
@@ -41,7 +99,10 @@ export const Dashboard: React.FC = () => {
     if (!user) return;
     try {
       await deleteDoc(doc(db, 'users', user.uid, 'saved_words', id));
-      setSavedWords(prev => prev.filter(w => w.id !== id));
+      const updatedWords = savedWords.filter(w => w.id !== id);
+      setSavedWords(updatedWords);
+      // Update cache after removal
+      setCachedWords(updatedWords);
     } catch (err) {
       console.error("Failed to remove word", err);
     }
@@ -83,12 +144,16 @@ export const Dashboard: React.FC = () => {
           {savedWords.length > 0 && (
             <motion.button
               onClick={startReview}
-              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-br from-golden-400 via-golden-500 to-golden-600 text-slate-900 rounded-2xl font-semibold shadow-[0_4px_20px_rgba(255,215,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_6px_30px_rgba(255,215,0,0.6),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all whitespace-nowrap"
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-br from-neon-cyan/20 via-neon-cyan/30 to-neon-cyan/40 text-neon-cyan border-2 border-neon-cyan/60 rounded-2xl font-semibold shadow-[0_4px_20px_rgba(0,243,255,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] hover:bg-neon-cyan/30 hover:border-neon-cyan/80 hover:shadow-[0_6px_30px_rgba(0,243,255,0.5),inset_0_1px_0_rgba(255,255,255,0.15)] backdrop-blur-xl transition-all whitespace-nowrap relative overflow-hidden"
+              style={{
+                background: 'linear-gradient(135deg, rgba(0, 243, 255, 0.2) 0%, rgba(0, 243, 255, 0.3) 50%, rgba(0, 243, 255, 0.4) 100%)',
+                boxShadow: '0 4px 20px rgba(0, 243, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 30px rgba(0, 243, 255, 0.2)'
+              }}
             >
-              <Play size={20} className="flex-shrink-0" />
-              <span>Review Words</span>
+              <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent rounded-2xl pointer-events-none" />
+              <Play size={20} className="flex-shrink-0 relative z-10" />
+              <span className="relative z-10">Review Words</span>
             </motion.button>
           )}
         </div>

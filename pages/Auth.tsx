@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Background } from '../components/Layout/Background';
 import { GlassButton } from '../components/ui/GlassButton';
 import { motion } from 'framer-motion';
-import { Cpu, Mail, Lock, ArrowRight } from 'lucide-react';
+import { Languages, Mail, Lock, ArrowRight } from 'lucide-react';
 
 export const Auth: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -37,12 +37,12 @@ export const Auth: React.FC = () => {
         initial={{ opacity: 0, y: 20, scale: 0.95 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ type: "spring", stiffness: 200 }}
-        className="w-full max-w-md bg-gradient-to-br from-slate-800/90 via-slate-900/90 to-slate-950/90 backdrop-blur-2xl border-2 border-golden-400/30 p-8 rounded-3xl shadow-2xl relative overflow-hidden"
+        className="w-full max-w-md bg-gradient-to-br from-slate-800/90 via-slate-900/90 to-slate-950/90 backdrop-blur-2xl border-2 border-neon-cyan/30 p-8 rounded-3xl shadow-2xl relative overflow-hidden"
         style={{
-          boxShadow: '0 25px 70px rgba(0, 0, 0, 0.5), 0 0 50px rgba(255, 215, 0, 0.15), inset 0 2px 0 rgba(255, 255, 255, 0.1)'
+          boxShadow: '0 25px 70px rgba(0, 0, 0, 0.5), 0 0 50px rgba(0, 243, 255, 0.15), inset 0 2px 0 rgba(255, 255, 255, 0.1)'
         }}
       >
-        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-golden-300 via-golden-400 to-golden-500" />
+        <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-neon-cyan/60 via-neon-cyan to-neon-cyan/80" />
         
         <motion.div 
           className="flex justify-center mb-8"
@@ -51,14 +51,14 @@ export const Auth: React.FC = () => {
           transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
         >
            <div 
-            className="p-5 rounded-2xl relative overflow-hidden"
+            className="p-5 rounded-2xl relative overflow-hidden border-2 border-neon-cyan/60"
             style={{
-              background: 'linear-gradient(135deg, #FFE55C 0%, #FFD700 50%, #E6C200 100%)',
-              boxShadow: '0 8px 30px rgba(255, 215, 0, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.4), 0 0 40px rgba(255, 215, 0, 0.4)'
+              background: 'linear-gradient(135deg, rgba(0, 243, 255, 0.2) 0%, rgba(0, 243, 255, 0.3) 50%, rgba(0, 243, 255, 0.4) 100%)',
+              boxShadow: '0 8px 30px rgba(0, 243, 255, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.1), 0 0 40px rgba(0, 243, 255, 0.2)'
             }}
            >
-            <div className="absolute inset-0 bg-gradient-to-b from-white/40 via-transparent to-transparent rounded-2xl pointer-events-none" />
-            <Cpu className="w-12 h-12 text-slate-900 relative z-10" />
+            <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent rounded-2xl pointer-events-none" />
+            <Languages className="w-12 h-12 text-neon-cyan relative z-10" />
            </div>
         </motion.div>
 
@@ -82,13 +82,13 @@ export const Auth: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.3 }}
           >
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-golden-400/70 group-focus-within:text-golden-400 transition-colors" size={22} />
+            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-neon-cyan/70 group-focus-within:text-neon-cyan transition-colors" size={22} />
             <input
               type="email"
               placeholder="Email Address"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full bg-slate-800/60 border-2 border-golden-400/30 rounded-2xl py-4 pl-14 pr-4 text-white placeholder:text-slate-400 focus:outline-none focus:border-golden-400/70 focus:bg-slate-800/80 focus:shadow-[0_0_20px_rgba(255,215,0,0.3)] transition-all text-base"
+              className="w-full bg-slate-800/60 border-2 border-neon-cyan/30 rounded-2xl py-4 pl-14 pr-4 text-white placeholder:text-slate-400 focus:outline-none focus:border-neon-cyan/70 focus:bg-slate-800/80 focus:shadow-[0_0_20px_rgba(0,243,255,0.3)] transition-all text-base"
               required
             />
           </motion.div>
@@ -99,13 +99,13 @@ export const Auth: React.FC = () => {
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.4 }}
           >
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-golden-400/70 group-focus-within:text-golden-400 transition-colors" size={22} />
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-neon-cyan/70 group-focus-within:text-neon-cyan transition-colors" size={22} />
             <input
               type="password"
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-800/60 border-2 border-golden-400/30 rounded-2xl py-4 pl-14 pr-4 text-white placeholder:text-slate-400 focus:outline-none focus:border-golden-400/70 focus:bg-slate-800/80 focus:shadow-[0_0_20px_rgba(255,215,0,0.3)] transition-all text-base"
+              className="w-full bg-slate-800/60 border-2 border-neon-cyan/30 rounded-2xl py-4 pl-14 pr-4 text-white placeholder:text-slate-400 focus:outline-none focus:border-neon-cyan/70 focus:bg-slate-800/80 focus:shadow-[0_0_20px_rgba(0,243,255,0.3)] transition-all text-base"
               required
             />
           </motion.div>

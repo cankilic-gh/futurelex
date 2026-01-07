@@ -9,10 +9,44 @@ import { Navbar } from '../components/Layout/Navbar';
 import { Card } from '../components/Flashcard/Card';
 import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
-import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const POOL_SIZE = 100;
+
+// Cache configuration
+const CACHE_KEY_SAVED = 'futurelex_saved_words_cache';
+const CACHE_KEY_COMPLETED = 'futurelex_completed_words_cache';
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Cache utility functions
+function getCachedWordIds(key: string): { ids: string[], timestamp: number } | null {
+  try {
+    const cached = localStorage.getItem(key);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return { ids: parsed.ids || [], timestamp: parsed.timestamp || 0 };
+  } catch (err) {
+    console.error(`[CACHE] Error reading cache for ${key}:`, err);
+    return null;
+  }
+}
+
+function setCachedWordIds(key: string, ids: string[]): void {
+  try {
+    const data = {
+      ids,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err) {
+    console.error(`[CACHE] Error writing cache for ${key}:`, err);
+  }
+}
+
+function isCacheValid(timestamp: number): boolean {
+  return Date.now() - timestamp < CACHE_TTL;
+}
 
 export const FlashcardSession: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -27,6 +61,18 @@ export const FlashcardSession: React.FC = () => {
   const [isCompleting, setIsCompleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
+  
+  // Card animation cycle for loader - must be at top level (before any early returns)
+  const [cardCycle, setCardCycle] = useState(0);
+  
+  useEffect(() => {
+    if (isLoading) {
+      const interval = setInterval(() => {
+        setCardCycle((prev) => prev + 1);
+      }, 2500); // Slower: 2.5 seconds per card
+      return () => clearInterval(interval);
+    }
+  }, [isLoading]);
 
   // Fetch saved and completed words, and initialize word pool
   useEffect(() => {
@@ -40,53 +86,119 @@ export const FlashcardSession: React.FC = () => {
           if (reviewWordsStr) {
             try {
               const reviewWords: Word[] = JSON.parse(reviewWordsStr);
-              setWords(reviewWords);
-              setIsLoading(false);
-              // Clear sessionStorage after loading
-              sessionStorage.removeItem('reviewWords');
-              return; // Early return for review mode
+              if (reviewWords.length > 0) {
+                setWords(reviewWords);
+                setIsLoading(false);
+                // Clear sessionStorage after loading
+                sessionStorage.removeItem('reviewWords');
+                return; // Early return for review mode
+              }
             } catch (err) {
               console.error("Error parsing review words", err);
             }
           }
+          // If no review words, fall through to normal loading
         }
 
-        // Fetch saved and completed words in parallel for better performance
-        const [savedSnapshot, completedSnapshot] = await Promise.all([
-          getDocs(query(collection(db, 'users', user.uid, 'saved_words'))),
-          getDocs(query(collection(db, 'users', user.uid, 'completed_words')))
-        ]);
+        // PROGRESSIVE LOADING: Load from cache first for instant display
+        const cachedSaved = getCachedWordIds(CACHE_KEY_SAVED);
+        const cachedCompleted = getCachedWordIds(CACHE_KEY_COMPLETED);
+        
+        let savedIds: string[] = [];
+        let completedIds: string[] = [];
+        let useCache = false;
 
-        const savedIds: string[] = [];
-        savedSnapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (data.wordId && !savedIds.includes(data.wordId)) {
-            savedIds.push(data.wordId);
+        // Use cache if valid
+        if (cachedSaved && isCacheValid(cachedSaved.timestamp)) {
+          savedIds = cachedSaved.ids;
+          useCache = true;
+          console.log("[CACHE] Using cached saved words:", { count: savedIds.length });
+        }
+        if (cachedCompleted && isCacheValid(cachedCompleted.timestamp)) {
+          completedIds = cachedCompleted.ids;
+          useCache = true;
+          console.log("[CACHE] Using cached completed words:", { count: completedIds.length });
+        }
+
+        // Set cached data immediately for progressive loading
+        if (useCache) {
+          setSavedWordIds(savedIds);
+          setCompletedWordIds(completedIds);
+          
+          // Load word pool immediately with cached data
+          if (!isReviewMode) {
+            const completedIdsSet = new Set(completedIds);
+            const pool = getWordPool(completedIdsSet, POOL_SIZE);
+            setWords(pool);
+            setIsLoading(false); // Show words immediately
           }
-        });
-        console.log("[FETCH] Loaded saved words:", { count: savedIds.length, ids: savedIds });
-        setSavedWordIds(savedIds);
+        }
 
-        const completedIds: string[] = [];
-        completedSnapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (data.wordId && !completedIds.includes(data.wordId)) {
-            completedIds.push(data.wordId);
+        // Fetch from Firebase in background (always fetch to keep cache fresh)
+        // Note: Firestore doesn't support field selection in queries, but we only process wordId
+        // to minimize memory usage and processing time
+        try {
+          const [savedSnapshot, completedSnapshot] = await Promise.all([
+            getDocs(query(collection(db, 'users', user.uid, 'saved_words'))),
+            getDocs(query(collection(db, 'users', user.uid, 'completed_words')))
+          ]);
+
+          // Optimization: Process only wordId field from documents (ignore other fields like timestamps)
+          // This reduces memory usage and processing time
+          const freshSavedIds: string[] = [];
+          savedSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.wordId && !freshSavedIds.includes(data.wordId)) {
+              freshSavedIds.push(data.wordId);
+            }
+          });
+          
+          const freshCompletedIds: string[] = [];
+          completedSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.wordId && !freshCompletedIds.includes(data.wordId)) {
+              freshCompletedIds.push(data.wordId);
+            }
+          });
+
+          console.log("[FETCH] Loaded saved words from Firebase:", { count: freshSavedIds.length });
+          console.log("[FETCH] Loaded completed words from Firebase:", { count: freshCompletedIds.length });
+
+          // Update cache
+          setCachedWordIds(CACHE_KEY_SAVED, freshSavedIds);
+          setCachedWordIds(CACHE_KEY_COMPLETED, freshCompletedIds);
+
+          // Update state with fresh data (may differ from cache)
+          setSavedWordIds(freshSavedIds);
+          setCompletedWordIds(freshCompletedIds);
+
+          // If we used cache, update word pool with fresh completed IDs
+          if (useCache && !isReviewMode) {
+            const freshCompletedIdsSet = new Set(freshCompletedIds);
+            const pool = getWordPool(freshCompletedIdsSet, POOL_SIZE);
+            setWords(pool);
+          } else if (!isReviewMode) {
+            // If no cache was used, set words now
+            const completedIdsSet = new Set(freshCompletedIds);
+            const pool = getWordPool(completedIdsSet, POOL_SIZE);
+            setWords(pool);
+            setIsLoading(false);
+          } else {
+            // Review mode: if no review words loaded, load normal pool as fallback
+            if (words.length === 0) {
+              const completedIdsSet = new Set(freshCompletedIds);
+              const pool = getWordPool(completedIdsSet, POOL_SIZE);
+              setWords(pool);
+            }
+            setIsLoading(false);
           }
-        });
-        console.log("[FETCH] Loaded completed words:", { count: completedIds.length, ids: completedIds });
-        setCompletedWordIds(completedIds);
-
-        // Load initial pool excluding completed words (only if not in review mode)
-        // Do this before setting loading to false for immediate display
-        if (!isReviewMode) {
-          const completedIdsSet = new Set(completedIds); // getWordPool expects Set
-          const pool = getWordPool(completedIdsSet, POOL_SIZE);
-          setWords(pool);
-          // Set loading false immediately after words are set
-          setIsLoading(false);
-        } else {
-          setIsLoading(false);
+        } catch (firebaseError) {
+          console.error("Error fetching from Firebase:", firebaseError);
+          // If cache was used, we already showed words, so just log error
+          // If no cache, fall through to error handling below
+          if (!useCache) {
+            throw firebaseError;
+          }
         }
       } catch (error) {
         console.error("Error fetching user words", error);
@@ -94,8 +206,10 @@ export const FlashcardSession: React.FC = () => {
         if (!isReviewMode) {
           const pool = getWordPool(new Set(), POOL_SIZE);
           setWords(pool);
+          setIsLoading(false);
+        } else {
+          setIsLoading(false);
         }
-        setIsLoading(false);
       }
     };
 
@@ -681,8 +795,9 @@ export const FlashcardSession: React.FC = () => {
   }, [words.length, currentIndex]);
 
   // Show loading state while words are being loaded
-  if (isLoading || words.length === 0) {
-    if (!isLoading && completedWordIds.length > 0 && !isReviewMode) {
+  if (isLoading || (words.length === 0 && !isReviewMode)) {
+    // Check if all words are completed (only if not in review mode and not currently loading)
+    if (!isLoading && words.length === 0 && completedWordIds.length > 0 && !isReviewMode) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
           <Background />
@@ -704,22 +819,237 @@ export const FlashcardSession: React.FC = () => {
         </div>
       );
     }
+    
+    // Card states: We always show 2 cards
+    // - Center card (always visible)
+    // - Leaving/Entering card (alternates)
+    const getCardState = (cardId: number) => {
+      if (cardId === 0) {
+        // Center card - always visible
+        return 'center';
+      }
+      
+      if (cardId === 1) {
+        // Even cycles: card is leaving (alternate correct/incorrect)
+        // Odd cycles: new card is entering
+        const isLeaving = cardCycle % 2 === 0;
+        if (isLeaving) {
+          // Alternate correct/incorrect every 2 cycles
+          const correctCycle = Math.floor(cardCycle / 2) % 2 === 0;
+          return correctCycle ? 'correct' : 'incorrect';
+        } else {
+          return 'entering';
+        }
+      }
+      
+      return 'hidden';
+    };
+    
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
         <Background />
         <Navbar />
         <motion.div 
-          className="text-center"
+          className="text-center max-w-4xl px-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
+          {/* Cyberpunk Card Flow Animation */}
+          <div 
+            className="relative w-full h-96 mb-8 flex items-center justify-center overflow-hidden"
+            style={{ perspective: '1200px' }}
+          >
+            {/* Center card - always visible */}
+            {[...Array(3)].map((_, i) => {
+              const state = getCardState(i);
+              const isCenter = state === 'center';
+              const isCorrect = state === 'correct';
+              const isIncorrect = state === 'incorrect';
+              const isEntering = state === 'entering';
+              
+              if (state === 'hidden') return null;
+              
+              return (
+                <motion.div
+                  key={i}
+                  className="absolute"
+                  style={{
+                    transformStyle: 'preserve-3d',
+                    transformOrigin: 'center center',
+                  }}
+                  initial={isEntering ? {
+                    x: 0,
+                    y: 200,
+                    scale: 0.5,
+                    opacity: 0,
+                    rotateY: 0,
+                    rotateX: 90,
+                  } : {}}
+                  animate={isCenter ? {
+                    x: 0,
+                    y: 0,
+                    scale: 1,
+                    opacity: 1,
+                    rotateY: 0,
+                    rotateX: 0,
+                    z: 0,
+                  } : isCorrect ? {
+                    x: 400,
+                    y: -50,
+                    scale: 0.6,
+                    opacity: [1, 0.8, 0],
+                    rotateY: 45,
+                    rotateX: -15,
+                    z: -100,
+                  } : isIncorrect ? {
+                    x: -400,
+                    y: -50,
+                    scale: 0.6,
+                    opacity: [1, 0.8, 0],
+                    rotateY: -45,
+                    rotateX: -15,
+                    z: -100,
+                  } : isEntering ? {
+                    x: 0,
+                    y: 0,
+                    scale: [0.5, 1],
+                    opacity: [0, 1],
+                    rotateY: 0,
+                    rotateX: [90, 0],
+                    z: 0,
+                  } : {}}
+                  transition={{
+                    duration: 0.8,
+                    type: "spring",
+                    stiffness: 150,
+                    damping: 25,
+                  }}
+                >
+                  {/* Card */}
+                  <div
+                    className="w-32 h-44 md:w-40 md:h-56 rounded-2xl border-2 relative overflow-hidden backdrop-blur-xl"
+                    style={{
+                      background: isCorrect
+                        ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.4) 0%, rgba(22, 163, 74, 0.5) 100%)'
+                        : isIncorrect
+                          ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.4) 0%, rgba(220, 38, 38, 0.5) 100%)'
+                          : 'linear-gradient(135deg, rgba(0, 243, 255, 0.3) 0%, rgba(0, 243, 255, 0.4) 100%)',
+                      borderColor: isCorrect
+                        ? 'rgba(34, 197, 94, 0.8)'
+                        : isIncorrect
+                          ? 'rgba(239, 68, 68, 0.8)'
+                          : 'rgba(0, 243, 255, 0.6)',
+                      boxShadow: isCorrect
+                        ? '0 20px 60px rgba(34, 197, 94, 0.6), 0 0 40px rgba(34, 197, 94, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2)'
+                        : isIncorrect
+                          ? '0 20px 60px rgba(239, 68, 68, 0.6), 0 0 40px rgba(239, 68, 68, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2)'
+                          : '0 20px 60px rgba(0, 243, 255, 0.4), 0 0 40px rgba(0, 243, 255, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.15)',
+                    }}
+                  >
+                    {/* Holographic shimmer effect */}
+                    <motion.div
+                      className="absolute inset-0 rounded-2xl"
+                      style={{
+                        background: 'linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%)',
+                      }}
+                      animate={{
+                        x: ['-100%', '200%'],
+                      }}
+                      transition={{
+                        duration: 3,
+                        repeat: Infinity,
+                        ease: "linear",
+                      }}
+                    />
+                    
+                    {/* Card content */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-10">
+                      {isCorrect ? (
+                        <CheckCircle className="w-10 h-10 md:w-12 md:h-12 text-green-400" />
+                      ) : isIncorrect ? (
+                        <motion.div
+                          animate={{ rotate: [0, 10, -10, 0] }}
+                          transition={{ duration: 0.5, repeat: Infinity }}
+                        >
+                          <X className="w-10 h-10 md:w-12 md:h-12 text-red-400" strokeWidth={3} />
+                        </motion.div>
+                      ) : (
+                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg border-2 border-neon-cyan/60 bg-neon-cyan/10" />
+                      )}
+                    </div>
+                    
+                    {/* Glow pulse effect */}
+                    {(isCorrect || isIncorrect) && (
+                      <motion.div
+                        className="absolute inset-0 rounded-2xl"
+                        style={{
+                          background: isCorrect
+                            ? 'radial-gradient(circle, rgba(34, 197, 94, 0.5) 0%, transparent 70%)'
+                            : 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 0%, transparent 70%)',
+                        }}
+                        animate={{
+                          opacity: [0.5, 1, 0.5],
+                          scale: [1, 1.3, 1],
+                        }}
+                        transition={{
+                          duration: 0.8,
+                          repeat: Infinity,
+                          ease: "easeInOut"
+                        }}
+                      />
+                    )}
+                    
+                    {/* Particle trail for correct/incorrect */}
+                    {(isCorrect || isIncorrect) && (
+                      <>
+                        {[...Array(8)].map((_, j) => (
+                          <motion.div
+                            key={j}
+                            className="absolute w-1.5 h-1.5 rounded-full"
+                            style={{
+                              background: isCorrect ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)',
+                              left: '50%',
+                              top: '50%',
+                            }}
+                            animate={{
+                              x: isCorrect 
+                                ? [0, Math.cos(j * 45 * Math.PI / 180) * 60]
+                                : [0, Math.cos(j * 45 * Math.PI / 180) * -60],
+                              y: [0, Math.sin(j * 45 * Math.PI / 180) * 60],
+                              opacity: [1, 0],
+                              scale: [1, 0],
+                            }}
+                            transition={{
+                              duration: 0.8,
+                              delay: j * 0.05,
+                              ease: "easeOut"
+                            }}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+          
+          {/* Status text */}
           <motion.div
-            className="w-16 h-16 border-4 border-neon-cyan/30 border-t-neon-cyan rounded-full mx-auto mb-4"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          />
-          <div className="text-2xl font-bold mb-2 text-neon-cyan">Loading Matrix...</div>
-          <div className="text-slate-400 text-sm">Initializing word pool...</div>
+            className="text-2xl md:text-3xl font-bold mb-2 text-neon-cyan"
+            animate={{ opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          >
+            Preparing your learning deck...
+          </motion.div>
+          
+          <motion.div
+            className="text-slate-400 text-sm md:text-base"
+            animate={{ opacity: [0.5, 0.8, 0.5] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+          >
+            {isLoading ? 'Loading words...' : 'Initializing word pool...'}
+          </motion.div>
         </motion.div>
       </div>
     );
@@ -853,9 +1183,14 @@ export const FlashcardSession: React.FC = () => {
                 toggleSaveWord();
               }}
               disabled={isSaving || isCompleting || !currentWord}
-              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               key={`save-${currentWord?.id}-${isSaved}-${savedWordIdsKey}`}
+              animate={isSaved && !isSaving ? {
+                scale: [1, 1.15, 1],
+              } : {}}
+              transition={{
+                scale: { duration: 0.4, type: "spring", stiffness: 300, damping: 15 }
+              }}
               className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
                 isSaved
                   ? 'bg-neon-pink/20 border-neon-pink/70 text-neon-pink shadow-[0_0_20px_rgba(255,0,85,0.4)]'
@@ -864,16 +1199,61 @@ export const FlashcardSession: React.FC = () => {
                     : 'bg-slate-800/50 border-neon-pink/50 text-neon-pink hover:bg-neon-pink/10 hover:border-neon-pink/80 hover:shadow-[0_0_20px_rgba(255,0,85,0.4)]'
               }`}
             >
-              {isSaving ? (
-                <CheckCircle2 size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              ) : isSaved ? (
-                <BookmarkCheck size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              ) : (
-                <Bookmark size={22} className="relative z-10 sm:w-6 sm:h-6" />
+              {/* Pink glow pulse when saved */}
+              {isSaved && !isSaving && (
+                <motion.div
+                  className="absolute inset-0 rounded-2xl"
+                  style={{
+                    background: 'radial-gradient(circle, rgba(255, 0, 85, 0.3) 0%, transparent 70%)',
+                  }}
+                  animate={{
+                    opacity: [0.3, 0.6, 0.3],
+                    scale: [1, 1.2, 1],
+                  }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity,
+                    ease: "easeInOut"
+                  }}
+                />
               )}
+              <AnimatePresence mode="wait">
+                {isSaving ? (
+                  <motion.div
+                    key="saving"
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 180 }}
+                    transition={{ duration: 0.3, type: "spring" }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle2 size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : isSaved ? (
+                  <motion.div
+                    key="saved"
+                    initial={{ scale: 0, rotate: -90 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 90 }}
+                    transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
+                    className="relative z-10"
+                  >
+                    <BookmarkCheck size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="unsaved"
+                    initial={{ scale: 1 }}
+                    animate={{ scale: 1 }}
+                    className="relative z-10"
+                  >
+                    <Bookmark size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.button>
 
-            {/* Complete Button - PRIMARY ACTION - Larger, more prominent, glossy golden with celebration effect */}
+            {/* Complete Button - PRIMARY ACTION - Green tones with celebration effect */}
             <motion.button
               onClick={() => {
                 console.log("[BUTTON] Complete clicked, current state:", { isCompleted, isSaving, isCompleting, currentWordId: currentWord?.id });
@@ -881,39 +1261,26 @@ export const FlashcardSession: React.FC = () => {
               }}
               disabled={isSaving || isCompleting || !currentWord}
               key={`complete-${currentWord?.id}-${isCompleted}-${completedWordIdsKey}`}
-              whileHover={{ scale: 1.1, rotate: [0, -5, 5, 0] }}
-              whileTap={{ scale: 0.9 }}
+              whileTap={{ scale: 0.95 }}
               animate={isCompleting ? {
                 scale: [1, 1.2, 1],
                 rotate: [0, 360]
+              } : isCompleted ? {
+                scale: [1, 1.1, 1],
               } : {}}
               transition={{ 
-                hover: { duration: 0.3 },
-                animate: { duration: 0.6, ease: "easeOut" }
+                animate: { duration: 0.5, type: "spring", stiffness: 300, damping: 15 },
+                scale: { duration: 0.4, type: "spring", stiffness: 300, damping: 15 }
               }}
-              className={`flex-shrink-0 relative p-5 sm:p-6 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
+              className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
                 isCompleted || isCompleting
                   ? 'bg-green-500/30 border-green-500/80 text-green-300 shadow-[0_0_30px_rgba(34,197,94,0.6)]'
-                  : 'bg-gradient-to-br from-golden-400 via-golden-500 to-golden-600 border-golden-400/80 text-slate-900 shadow-[0_8px_30px_rgba(255,215,0,0.5),inset_0_2px_0_rgba(255,255,255,0.4)] hover:shadow-[0_10px_40px_rgba(255,215,0,0.7),inset_0_2px_0_rgba(255,255,255,0.5)]'
+                  : 'bg-gradient-to-br from-green-500/20 via-green-600/30 to-green-700/40 border-green-500/60 text-green-400 shadow-[0_4px_20px_rgba(34,197,94,0.3)] hover:bg-green-500/10 hover:border-green-500/80 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]'
               }`}
               style={isCompleted || isCompleting ? {} : {
-                background: 'linear-gradient(135deg, #FFE55C 0%, #FFD700 50%, #E6C200 100%)',
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.3) 50%, rgba(21, 128, 61, 0.4) 100%)',
               }}
             >
-              {/* Glossy highlight for golden button */}
-              {!(isCompleted || isCompleting) && (
-                <motion.div 
-                  className="absolute inset-0 bg-gradient-to-b from-white/40 via-transparent to-transparent rounded-2xl pointer-events-none"
-                  animate={{
-                    opacity: [0.3, 0.5, 0.3],
-                  }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                />
-              )}
               {/* Celebration particles effect when completing */}
               {isCompleting && (
                 <>
@@ -942,13 +1309,40 @@ export const FlashcardSession: React.FC = () => {
                   ))}
                 </>
               )}
-              {isCompleting ? (
-                <CheckCircle2 size={28} className="relative z-10 sm:w-8 sm:h-8" />
-              ) : isCompleted ? (
-                <CheckCircle size={28} className="relative z-10 sm:w-8 sm:h-8" />
-              ) : (
-                <CheckCircle size={28} className="relative z-10 sm:w-8 sm:h-8" />
-              )}
+              <AnimatePresence mode="wait">
+                {isCompleting ? (
+                  <motion.div
+                    key="completing"
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 180 }}
+                    transition={{ duration: 0.3, type: "spring" }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle2 size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : isCompleted ? (
+                  <motion.div
+                    key="completed"
+                    initial={{ scale: 0, rotate: -90 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 90 }}
+                    transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="incomplete"
+                    initial={{ scale: 1 }}
+                    animate={{ scale: 1 }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.button>
 
             {/* Next Button - Smaller, less prominent */}
