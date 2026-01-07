@@ -40,15 +40,18 @@ export const FlashcardSession: React.FC = () => {
           if (reviewWordsStr) {
             try {
               const reviewWords: Word[] = JSON.parse(reviewWordsStr);
-              setWords(reviewWords);
-              setIsLoading(false);
-              // Clear sessionStorage after loading
-              sessionStorage.removeItem('reviewWords');
-              return; // Early return for review mode
+              if (reviewWords.length > 0) {
+                setWords(reviewWords);
+                setIsLoading(false);
+                // Clear sessionStorage after loading
+                sessionStorage.removeItem('reviewWords');
+                return; // Early return for review mode
+              }
             } catch (err) {
               console.error("Error parsing review words", err);
             }
           }
+          // If no review words, fall through to normal loading
         }
 
         // Fetch saved and completed words in parallel for better performance
@@ -86,6 +89,12 @@ export const FlashcardSession: React.FC = () => {
           // Set loading false immediately after words are set
           setIsLoading(false);
         } else {
+          // Review mode: if no review words loaded, load normal pool as fallback
+          if (words.length === 0) {
+            const completedIdsSet = new Set(completedIds);
+            const pool = getWordPool(completedIdsSet, POOL_SIZE);
+            setWords(pool);
+          }
           setIsLoading(false);
         }
       } catch (error) {
@@ -683,8 +692,9 @@ export const FlashcardSession: React.FC = () => {
   }, [words.length, currentIndex]);
 
   // Show loading state while words are being loaded
-  if (isLoading || words.length === 0) {
-    if (!isLoading && completedWordIds.length > 0 && !isReviewMode) {
+  if (isLoading || (words.length === 0 && !isReviewMode)) {
+    // Check if all words are completed (only if not in review mode and not currently loading)
+    if (!isLoading && words.length === 0 && completedWordIds.length > 0 && !isReviewMode) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
           <Background />
