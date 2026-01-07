@@ -14,6 +14,40 @@ import { AnimatePresence, motion } from 'framer-motion';
 
 const POOL_SIZE = 100;
 
+// Cache configuration
+const CACHE_KEY_SAVED = 'futurelex_saved_words_cache';
+const CACHE_KEY_COMPLETED = 'futurelex_completed_words_cache';
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Cache utility functions
+function getCachedWordIds(key: string): { ids: string[], timestamp: number } | null {
+  try {
+    const cached = localStorage.getItem(key);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return { ids: parsed.ids || [], timestamp: parsed.timestamp || 0 };
+  } catch (err) {
+    console.error(`[CACHE] Error reading cache for ${key}:`, err);
+    return null;
+  }
+}
+
+function setCachedWordIds(key: string, ids: string[]): void {
+  try {
+    const data = {
+      ids,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (err) {
+    console.error(`[CACHE] Error writing cache for ${key}:`, err);
+  }
+}
+
+function isCacheValid(timestamp: number): boolean {
+  return Date.now() - timestamp < CACHE_TTL;
+}
+
 export const FlashcardSession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const isReviewMode = searchParams.get('review') === 'true';
@@ -66,48 +100,105 @@ export const FlashcardSession: React.FC = () => {
           // If no review words, fall through to normal loading
         }
 
-        // Fetch saved and completed words in parallel for better performance
-        const [savedSnapshot, completedSnapshot] = await Promise.all([
-          getDocs(query(collection(db, 'users', user.uid, 'saved_words'))),
-          getDocs(query(collection(db, 'users', user.uid, 'completed_words')))
-        ]);
+        // PROGRESSIVE LOADING: Load from cache first for instant display
+        const cachedSaved = getCachedWordIds(CACHE_KEY_SAVED);
+        const cachedCompleted = getCachedWordIds(CACHE_KEY_COMPLETED);
+        
+        let savedIds: string[] = [];
+        let completedIds: string[] = [];
+        let useCache = false;
 
-        const savedIds: string[] = [];
-        savedSnapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (data.wordId && !savedIds.includes(data.wordId)) {
-            savedIds.push(data.wordId);
-          }
-        });
-        console.log("[FETCH] Loaded saved words:", { count: savedIds.length, ids: savedIds });
-        setSavedWordIds(savedIds);
+        // Use cache if valid
+        if (cachedSaved && isCacheValid(cachedSaved.timestamp)) {
+          savedIds = cachedSaved.ids;
+          useCache = true;
+          console.log("[CACHE] Using cached saved words:", { count: savedIds.length });
+        }
+        if (cachedCompleted && isCacheValid(cachedCompleted.timestamp)) {
+          completedIds = cachedCompleted.ids;
+          useCache = true;
+          console.log("[CACHE] Using cached completed words:", { count: completedIds.length });
+        }
 
-        const completedIds: string[] = [];
-        completedSnapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (data.wordId && !completedIds.includes(data.wordId)) {
-            completedIds.push(data.wordId);
-          }
-        });
-        console.log("[FETCH] Loaded completed words:", { count: completedIds.length, ids: completedIds });
-        setCompletedWordIds(completedIds);
-
-        // Load initial pool excluding completed words (only if not in review mode)
-        // Do this before setting loading to false for immediate display
-        if (!isReviewMode) {
-          const completedIdsSet = new Set(completedIds); // getWordPool expects Set
-          const pool = getWordPool(completedIdsSet, POOL_SIZE);
-          setWords(pool);
-          // Set loading false immediately after words are set
-          setIsLoading(false);
-        } else {
-          // Review mode: if no review words loaded, load normal pool as fallback
-          if (words.length === 0) {
+        // Set cached data immediately for progressive loading
+        if (useCache) {
+          setSavedWordIds(savedIds);
+          setCompletedWordIds(completedIds);
+          
+          // Load word pool immediately with cached data
+          if (!isReviewMode) {
             const completedIdsSet = new Set(completedIds);
             const pool = getWordPool(completedIdsSet, POOL_SIZE);
             setWords(pool);
+            setIsLoading(false); // Show words immediately
           }
-          setIsLoading(false);
+        }
+
+        // Fetch from Firebase in background (always fetch to keep cache fresh)
+        // Note: Firestore doesn't support field selection in queries, but we only process wordId
+        // to minimize memory usage and processing time
+        try {
+          const [savedSnapshot, completedSnapshot] = await Promise.all([
+            getDocs(query(collection(db, 'users', user.uid, 'saved_words'))),
+            getDocs(query(collection(db, 'users', user.uid, 'completed_words')))
+          ]);
+
+          // Optimization: Process only wordId field from documents (ignore other fields like timestamps)
+          // This reduces memory usage and processing time
+          const freshSavedIds: string[] = [];
+          savedSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.wordId && !freshSavedIds.includes(data.wordId)) {
+              freshSavedIds.push(data.wordId);
+            }
+          });
+          
+          const freshCompletedIds: string[] = [];
+          completedSnapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.wordId && !freshCompletedIds.includes(data.wordId)) {
+              freshCompletedIds.push(data.wordId);
+            }
+          });
+
+          console.log("[FETCH] Loaded saved words from Firebase:", { count: freshSavedIds.length });
+          console.log("[FETCH] Loaded completed words from Firebase:", { count: freshCompletedIds.length });
+
+          // Update cache
+          setCachedWordIds(CACHE_KEY_SAVED, freshSavedIds);
+          setCachedWordIds(CACHE_KEY_COMPLETED, freshCompletedIds);
+
+          // Update state with fresh data (may differ from cache)
+          setSavedWordIds(freshSavedIds);
+          setCompletedWordIds(freshCompletedIds);
+
+          // If we used cache, update word pool with fresh completed IDs
+          if (useCache && !isReviewMode) {
+            const freshCompletedIdsSet = new Set(freshCompletedIds);
+            const pool = getWordPool(freshCompletedIdsSet, POOL_SIZE);
+            setWords(pool);
+          } else if (!isReviewMode) {
+            // If no cache was used, set words now
+            const completedIdsSet = new Set(freshCompletedIds);
+            const pool = getWordPool(completedIdsSet, POOL_SIZE);
+            setWords(pool);
+            setIsLoading(false);
+          } else {
+            // Review mode: if no review words loaded, load normal pool as fallback
+            if (words.length === 0) {
+              const completedIdsSet = new Set(freshCompletedIds);
+              const pool = getWordPool(completedIdsSet, POOL_SIZE);
+              setWords(pool);
+            }
+            setIsLoading(false);
+          }
+        } catch (firebaseError) {
+          console.error("Error fetching from Firebase:", firebaseError);
+          // If cache was used, we already showed words, so just log error
+          // If no cache, fall through to error handling below
+          if (!useCache) {
+            throw firebaseError;
+          }
         }
       } catch (error) {
         console.error("Error fetching user words", error);
