@@ -9,7 +9,7 @@ import { Navbar } from '../components/Layout/Navbar';
 import { Card } from '../components/Flashcard/Card';
 import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
-import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, Cpu } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const POOL_SIZE = 100;
@@ -704,22 +704,128 @@ export const FlashcardSession: React.FC = () => {
         </div>
       );
     }
+    
+    // Creative loading states
+    const loadingStates = ["Translating...", "Learning...", "Speaking..."];
+    const [currentState, setCurrentState] = useState(0);
+    
+    useEffect(() => {
+      if (isLoading) {
+        const interval = setInterval(() => {
+          setCurrentState((prev) => (prev + 1) % loadingStates.length);
+        }, 2000);
+        return () => clearInterval(interval);
+      }
+    }, [isLoading]);
+    
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
         <Background />
         <Navbar />
         <motion.div 
-          className="text-center"
+          className="text-center max-w-md px-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
+          {/* Animated progress circle */}
+          <div className="relative w-24 h-24 mx-auto mb-6">
+            <motion.div
+              className="absolute inset-0 border-4 border-neon-cyan/20 rounded-full"
+            />
+            <motion.div
+              className="absolute inset-0 border-4 border-transparent border-t-neon-cyan rounded-full"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+            />
+            {/* Inner pulsing circle */}
+            <motion.div
+              className="absolute inset-4 border-2 border-neon-cyan/40 rounded-full"
+              animate={{
+                scale: [1, 1.2, 1],
+                opacity: [0.4, 0.8, 0.4],
+              }}
+              transition={{
+                duration: 2,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+            />
+            {/* Center icon */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <motion.div
+                animate={{
+                  scale: [1, 1.1, 1],
+                  rotate: [0, 5, -5, 0],
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: "easeInOut"
+                }}
+              >
+                <Cpu className="w-8 h-8 text-neon-cyan" />
+              </motion.div>
+            </div>
+          </div>
+          
+          {/* Animated text states */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentState}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.3 }}
+              className="text-2xl font-bold mb-2 text-neon-cyan"
+            >
+              {loadingStates[currentState]}
+            </motion.div>
+          </AnimatePresence>
+          
           <motion.div
-            className="w-16 h-16 border-4 border-neon-cyan/30 border-t-neon-cyan rounded-full mx-auto mb-4"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          />
-          <div className="text-2xl font-bold mb-2 text-neon-cyan">Loading Matrix...</div>
-          <div className="text-slate-400 text-sm">Initializing word pool...</div>
+            className="text-slate-400 text-sm mb-6"
+            animate={{ opacity: [0.5, 1, 0.5] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          >
+            Initializing word pool...
+          </motion.div>
+          
+          {/* Progress bar */}
+          <div className="w-full max-w-xs mx-auto h-1 bg-slate-800/50 rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-gradient-to-r from-neon-cyan/50 via-neon-cyan to-neon-cyan/50"
+              initial={{ width: "0%" }}
+              animate={{ width: "100%" }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: "easeInOut"
+              }}
+            />
+          </div>
+          
+          {/* Floating particles */}
+          {[...Array(8)].map((_, i) => (
+            <motion.div
+              key={i}
+              className="absolute w-1 h-1 bg-neon-cyan rounded-full"
+              style={{
+                left: `${20 + i * 10}%`,
+                top: `${30 + (i % 3) * 20}%`,
+              }}
+              animate={{
+                y: [0, -20, 0],
+                opacity: [0.3, 0.8, 0.3],
+                scale: [0.5, 1, 0.5],
+              }}
+              transition={{
+                duration: 2 + i * 0.2,
+                repeat: Infinity,
+                ease: "easeInOut",
+                delay: i * 0.1,
+              }}
+            />
+          ))}
         </motion.div>
       </div>
     );
@@ -853,9 +959,14 @@ export const FlashcardSession: React.FC = () => {
                 toggleSaveWord();
               }}
               disabled={isSaving || isCompleting || !currentWord}
-              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               key={`save-${currentWord?.id}-${isSaved}-${savedWordIdsKey}`}
+              animate={isSaved && !isSaving ? {
+                scale: [1, 1.15, 1],
+              } : {}}
+              transition={{
+                scale: { duration: 0.4, type: "spring", stiffness: 300, damping: 15 }
+              }}
               className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
                 isSaved
                   ? 'bg-neon-pink/20 border-neon-pink/70 text-neon-pink shadow-[0_0_20px_rgba(255,0,85,0.4)]'
@@ -864,13 +975,58 @@ export const FlashcardSession: React.FC = () => {
                     : 'bg-slate-800/50 border-neon-pink/50 text-neon-pink hover:bg-neon-pink/10 hover:border-neon-pink/80 hover:shadow-[0_0_20px_rgba(255,0,85,0.4)]'
               }`}
             >
-              {isSaving ? (
-                <CheckCircle2 size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              ) : isSaved ? (
-                <BookmarkCheck size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              ) : (
-                <Bookmark size={22} className="relative z-10 sm:w-6 sm:h-6" />
+              {/* Pink glow pulse when saved */}
+              {isSaved && !isSaving && (
+                <motion.div
+                  className="absolute inset-0 rounded-2xl"
+                  style={{
+                    background: 'radial-gradient(circle, rgba(255, 0, 85, 0.3) 0%, transparent 70%)',
+                  }}
+                  animate={{
+                    opacity: [0.3, 0.6, 0.3],
+                    scale: [1, 1.2, 1],
+                  }}
+                  transition={{
+                    duration: 1.5,
+                    repeat: Infinity,
+                    ease: "easeInOut"
+                  }}
+                />
               )}
+              <AnimatePresence mode="wait">
+                {isSaving ? (
+                  <motion.div
+                    key="saving"
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 180 }}
+                    transition={{ duration: 0.3, type: "spring" }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle2 size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : isSaved ? (
+                  <motion.div
+                    key="saved"
+                    initial={{ scale: 0, rotate: -90 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 90 }}
+                    transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
+                    className="relative z-10"
+                  >
+                    <BookmarkCheck size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="unsaved"
+                    initial={{ scale: 1 }}
+                    animate={{ scale: 1 }}
+                    className="relative z-10"
+                  >
+                    <Bookmark size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.button>
 
             {/* Complete Button - PRIMARY ACTION - Green tones with celebration effect */}
@@ -885,9 +1041,12 @@ export const FlashcardSession: React.FC = () => {
               animate={isCompleting ? {
                 scale: [1, 1.2, 1],
                 rotate: [0, 360]
+              } : isCompleted ? {
+                scale: [1, 1.1, 1],
               } : {}}
               transition={{ 
-                animate: { duration: 0.6, ease: "easeOut" }
+                animate: { duration: 0.5, type: "spring", stiffness: 300, damping: 15 },
+                scale: { duration: 0.4, type: "spring", stiffness: 300, damping: 15 }
               }}
               className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
                 isCompleted || isCompleting
@@ -926,13 +1085,40 @@ export const FlashcardSession: React.FC = () => {
                   ))}
                 </>
               )}
-              {isCompleting ? (
-                <CheckCircle2 size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              ) : isCompleted ? (
-                <CheckCircle size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              ) : (
-                <CheckCircle size={22} className="relative z-10 sm:w-6 sm:h-6" />
-              )}
+              <AnimatePresence mode="wait">
+                {isCompleting ? (
+                  <motion.div
+                    key="completing"
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 180 }}
+                    transition={{ duration: 0.3, type: "spring" }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle2 size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : isCompleted ? (
+                  <motion.div
+                    key="completed"
+                    initial={{ scale: 0, rotate: -90 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    exit={{ scale: 0, rotate: 90 }}
+                    transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="incomplete"
+                    initial={{ scale: 1 }}
+                    animate={{ scale: 1 }}
+                    className="relative z-10"
+                  >
+                    <CheckCircle size={22} className="sm:w-6 sm:h-6" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.button>
 
             {/* Next Button - Smaller, less prominent */}
