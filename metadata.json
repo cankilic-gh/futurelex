@@ -1,0 +1,5 @@
+{
+  "name": "FutureLex",
+  "description": "A futuristic, gamified English learning application featuring 3000 core words, utilizing Glassmorphism aesthetics and Firebase for progress tracking.",
+  "requestFramePermissions": []
+}
