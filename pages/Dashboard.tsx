@@ -85,10 +85,15 @@ export const Dashboard: React.FC = () => {
               onClick={startReview}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-br from-golden-400 via-golden-500 to-golden-600 text-slate-900 rounded-2xl font-semibold shadow-[0_4px_20px_rgba(255,215,0,0.4),inset_0_1px_0_rgba(255,255,255,0.3)] hover:shadow-[0_6px_30px_rgba(255,215,0,0.6),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all whitespace-nowrap"
+              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-br from-neon-cyan/20 via-neon-cyan/30 to-neon-cyan/40 text-neon-cyan border-2 border-neon-cyan/60 rounded-2xl font-semibold shadow-[0_4px_20px_rgba(0,243,255,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] hover:bg-neon-cyan/30 hover:border-neon-cyan/80 hover:shadow-[0_6px_30px_rgba(0,243,255,0.5),inset_0_1px_0_rgba(255,255,255,0.15)] backdrop-blur-xl transition-all whitespace-nowrap relative overflow-hidden"
+              style={{
+                background: 'linear-gradient(135deg, rgba(0, 243, 255, 0.2) 0%, rgba(0, 243, 255, 0.3) 50%, rgba(0, 243, 255, 0.4) 100%)',
+                boxShadow: '0 4px 20px rgba(0, 243, 255, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 0 30px rgba(0, 243, 255, 0.2)'
+              }}
             >
-              <Play size={20} className="flex-shrink-0" />
-              <span>Review Words</span>
+              <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent rounded-2xl pointer-events-none" />
+              <Play size={20} className="flex-shrink-0 relative z-10" />
+              <span className="relative z-10">Review Words</span>
             </motion.button>
           )}
         </div>
