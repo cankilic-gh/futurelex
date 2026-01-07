@@ -94,8 +94,10 @@ export const FlashcardSession: React.FC = () => {
         if (!isReviewMode) {
           const pool = getWordPool(new Set(), POOL_SIZE);
           setWords(pool);
+          setIsLoading(false);
+        } else {
+          setIsLoading(false);
         }
-        setIsLoading(false);
       }
     };
 
@@ -705,25 +707,40 @@ export const FlashcardSession: React.FC = () => {
       );
     }
     
-    // Card animation cycle - infinite loop
-    const [cardIndex, setCardIndex] = useState(0);
+    // Card animation cycle - infinite loop with alternating correct/incorrect
+    const [cardCycle, setCardCycle] = useState(0);
     
     useEffect(() => {
       if (isLoading) {
         const interval = setInterval(() => {
-          setCardIndex((prev) => (prev + 1) % 6); // 6 card cycle
-        }, 1200);
+          setCardCycle((prev) => prev + 1);
+        }, 2500); // Slower: 2.5 seconds per card
         return () => clearInterval(interval);
       }
     }, [isLoading]);
     
-    // Card states: center, correct (right), incorrect (left)
-    const getCardState = (index: number) => {
-      const relativeIndex = (index - cardIndex + 6) % 6;
-      if (relativeIndex === 0) return 'center';
-      if (relativeIndex === 1) return 'correct'; // Going right
-      if (relativeIndex === 2) return 'incorrect'; // Going left
-      if (relativeIndex === 3) return 'entering'; // Coming from back
+    // Card states: We always show 2 cards
+    // - Center card (always visible)
+    // - Leaving/Entering card (alternates)
+    const getCardState = (cardId: number) => {
+      if (cardId === 0) {
+        // Center card - always visible
+        return 'center';
+      }
+      
+      if (cardId === 1) {
+        // Even cycles: card is leaving (alternate correct/incorrect)
+        // Odd cycles: new card is entering
+        const isLeaving = cardCycle % 2 === 0;
+        if (isLeaving) {
+          // Alternate correct/incorrect every 2 cycles
+          const correctCycle = Math.floor(cardCycle / 2) % 2 === 0;
+          return correctCycle ? 'correct' : 'incorrect';
+        } else {
+          return 'entering';
+        }
+      }
+      
       return 'hidden';
     };
     
@@ -742,7 +759,7 @@ export const FlashcardSession: React.FC = () => {
             style={{ perspective: '1200px' }}
           >
             {/* Center card - always visible */}
-            {[...Array(6)].map((_, i) => {
+            {[...Array(3)].map((_, i) => {
               const state = getCardState(i);
               const isCenter = state === 'center';
               const isCorrect = state === 'correct';
@@ -801,10 +818,10 @@ export const FlashcardSession: React.FC = () => {
                     z: 0,
                   } : {}}
                   transition={{
-                    duration: 0.6,
+                    duration: 0.8,
                     type: "spring",
-                    stiffness: 200,
-                    damping: 20,
+                    stiffness: 150,
+                    damping: 25,
                   }}
                 >
                   {/* Card */}
