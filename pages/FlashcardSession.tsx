@@ -881,7 +881,6 @@ export const FlashcardSession: React.FC = () => {
               }}
               disabled={isSaving || isCompleting || !currentWord}
               key={`complete-${currentWord?.id}-${isCompleted}-${completedWordIdsKey}`}
-              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               animate={isCompleting ? {
                 scale: [1, 1.2, 1],
