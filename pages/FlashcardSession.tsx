@@ -9,7 +9,7 @@ import { Navbar } from '../components/Layout/Navbar';
 import { Card } from '../components/Flashcard/Card';
 import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
-import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, Cpu } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, Cpu, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const POOL_SIZE = 100;
@@ -705,45 +705,51 @@ export const FlashcardSession: React.FC = () => {
       );
     }
     
-    // Card animation state for loop
-    const [animationCycle, setAnimationCycle] = useState(0);
+    // Card animation cycle - infinite loop
+    const [cardIndex, setCardIndex] = useState(0);
     
     useEffect(() => {
       if (isLoading) {
         const interval = setInterval(() => {
-          setAnimationCycle((prev) => (prev + 1) % 3);
-        }, 2500);
+          setCardIndex((prev) => (prev + 1) % 6); // 6 card cycle
+        }, 1200);
         return () => clearInterval(interval);
       }
     }, [isLoading]);
+    
+    // Card states: center, correct (right), incorrect (left)
+    const getCardState = (index: number) => {
+      const relativeIndex = (index - cardIndex + 6) % 6;
+      if (relativeIndex === 0) return 'center';
+      if (relativeIndex === 1) return 'correct'; // Going right
+      if (relativeIndex === 2) return 'incorrect'; // Going left
+      if (relativeIndex === 3) return 'entering'; // Coming from back
+      return 'hidden';
+    };
     
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
         <Background />
         <Navbar />
         <motion.div 
-          className="text-center max-w-2xl px-4"
+          className="text-center max-w-4xl px-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
-          {/* Isometric Card Deck Animation */}
+          {/* Cyberpunk Card Flow Animation */}
           <div 
-            className="relative w-full h-64 mb-8 flex items-center justify-center"
-            style={{ perspective: '1000px' }}
+            className="relative w-full h-96 mb-8 flex items-center justify-center overflow-hidden"
+            style={{ perspective: '1200px' }}
           >
-            {/* Card deck - isometric fan layout */}
-            {[...Array(12)].map((_, i) => {
-              // Cycle through: learning -> review -> new
-              const cyclePosition = (i + animationCycle * 4) % 12;
-              const isLearning = cyclePosition < 4; // Cards being learned
-              const isReview = cyclePosition >= 4 && cyclePosition < 7; // Cards for review
-              const isNew = cyclePosition >= 7; // New cards
+            {/* Center card - always visible */}
+            {[...Array(6)].map((_, i) => {
+              const state = getCardState(i);
+              const isCenter = state === 'center';
+              const isCorrect = state === 'correct';
+              const isIncorrect = state === 'incorrect';
+              const isEntering = state === 'entering';
               
-              // Calculate rotation and position for fan effect
-              const totalCards = 12;
-              const centerIndex = totalCards / 2;
-              const offset = (i - centerIndex) * 8; // Degrees
-              const zOffset = Math.abs(i - centerIndex) * 8; // Depth
+              if (state === 'hidden') return null;
               
               return (
                 <motion.div
@@ -751,81 +757,158 @@ export const FlashcardSession: React.FC = () => {
                   className="absolute"
                   style={{
                     transformStyle: 'preserve-3d',
-                    transformOrigin: 'center bottom',
+                    transformOrigin: 'center center',
                   }}
-                  animate={isLearning ? {
-                    // Cards being learned - fly away with green glow, then reset
-                    y: [0, -150, 0],
-                    opacity: [1, 0, 1],
-                    scale: [0.8, 0.2, 0.8],
-                    rotateY: [offset, offset + 45, offset],
-                    rotateX: [15, 60, 15],
-                  } : {
-                    // Cards staying - subtle pulse
-                    y: [0, -5, 0],
-                    opacity: isReview ? [0.7, 0.9, 0.7] : [0.5, 0.7, 0.5],
-                    scale: [0.8, 0.85, 0.8],
-                    rotateY: offset,
-                    rotateX: 15,
-                  }}
+                  initial={isEntering ? {
+                    x: 0,
+                    y: 200,
+                    scale: 0.5,
+                    opacity: 0,
+                    rotateY: 0,
+                    rotateX: 90,
+                  } : {}}
+                  animate={isCenter ? {
+                    x: 0,
+                    y: 0,
+                    scale: 1,
+                    opacity: 1,
+                    rotateY: 0,
+                    rotateX: 0,
+                    z: 0,
+                  } : isCorrect ? {
+                    x: 400,
+                    y: -50,
+                    scale: 0.6,
+                    opacity: [1, 0.8, 0],
+                    rotateY: 45,
+                    rotateX: -15,
+                    z: -100,
+                  } : isIncorrect ? {
+                    x: -400,
+                    y: -50,
+                    scale: 0.6,
+                    opacity: [1, 0.8, 0],
+                    rotateY: -45,
+                    rotateX: -15,
+                    z: -100,
+                  } : isEntering ? {
+                    x: 0,
+                    y: 0,
+                    scale: [0.5, 1],
+                    opacity: [0, 1],
+                    rotateY: 0,
+                    rotateX: [90, 0],
+                    z: 0,
+                  } : {}}
                   transition={{
-                    duration: isLearning ? 2 : 2.5,
-                    repeat: Infinity,
-                    repeatDelay: isLearning ? 0.5 : 0,
-                    delay: isLearning ? (cyclePosition % 4) * 0.2 : 0,
-                    ease: isLearning ? "easeInOut" : "easeInOut",
+                    duration: 0.6,
+                    type: "spring",
+                    stiffness: 200,
+                    damping: 20,
                   }}
                 >
                   {/* Card */}
                   <div
-                    className="w-20 h-28 rounded-xl border-2 relative overflow-hidden backdrop-blur-xl"
+                    className="w-32 h-44 md:w-40 md:h-56 rounded-2xl border-2 relative overflow-hidden backdrop-blur-xl"
                     style={{
-                      background: isLearning
-                        ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.3) 0%, rgba(22, 163, 74, 0.4) 100%)'
-                        : isReview
-                          ? 'linear-gradient(135deg, rgba(255, 0, 85, 0.2) 0%, rgba(230, 57, 107, 0.3) 100%)'
-                          : 'linear-gradient(135deg, rgba(0, 243, 255, 0.2) 0%, rgba(0, 243, 255, 0.3) 100%)',
-                      borderColor: isLearning
-                        ? 'rgba(34, 197, 94, 0.6)'
-                        : isReview
-                          ? 'rgba(255, 0, 85, 0.6)'
-                          : 'rgba(0, 243, 255, 0.5)',
-                      boxShadow: isLearning
-                        ? '0 8px 20px rgba(34, 197, 94, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                        : isReview
-                          ? '0 8px 20px rgba(255, 0, 85, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
-                          : '0 8px 20px rgba(0, 243, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
-                      transform: `rotateY(${offset}deg) rotateX(15deg)`,
+                      background: isCorrect
+                        ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.4) 0%, rgba(22, 163, 74, 0.5) 100%)'
+                        : isIncorrect
+                          ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.4) 0%, rgba(220, 38, 38, 0.5) 100%)'
+                          : 'linear-gradient(135deg, rgba(0, 243, 255, 0.3) 0%, rgba(0, 243, 255, 0.4) 100%)',
+                      borderColor: isCorrect
+                        ? 'rgba(34, 197, 94, 0.8)'
+                        : isIncorrect
+                          ? 'rgba(239, 68, 68, 0.8)'
+                          : 'rgba(0, 243, 255, 0.6)',
+                      boxShadow: isCorrect
+                        ? '0 20px 60px rgba(34, 197, 94, 0.6), 0 0 40px rgba(34, 197, 94, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2)'
+                        : isIncorrect
+                          ? '0 20px 60px rgba(239, 68, 68, 0.6), 0 0 40px rgba(239, 68, 68, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2)'
+                          : '0 20px 60px rgba(0, 243, 255, 0.4), 0 0 40px rgba(0, 243, 255, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.15)',
                     }}
                   >
+                    {/* Holographic shimmer effect */}
+                    <motion.div
+                      className="absolute inset-0 rounded-2xl"
+                      style={{
+                        background: 'linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%)',
+                      }}
+                      animate={{
+                        x: ['-100%', '200%'],
+                      }}
+                      transition={{
+                        duration: 3,
+                        repeat: Infinity,
+                        ease: "linear",
+                      }}
+                    />
+                    
                     {/* Card content */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
-                      {isLearning ? (
-                        <CheckCircle className="w-6 h-6 text-green-400" />
-                      ) : isReview ? (
-                        <BookmarkCheck className="w-6 h-6 text-neon-pink" />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-10">
+                      {isCorrect ? (
+                        <CheckCircle className="w-10 h-10 md:w-12 md:h-12 text-green-400" />
+                      ) : isIncorrect ? (
+                        <motion.div
+                          animate={{ rotate: [0, 10, -10, 0] }}
+                          transition={{ duration: 0.5, repeat: Infinity }}
+                        >
+                          <X className="w-10 h-10 md:w-12 md:h-12 text-red-400" strokeWidth={3} />
+                        </motion.div>
                       ) : (
-                        <div className="w-4 h-4 rounded border border-neon-cyan/50" />
+                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg border-2 border-neon-cyan/60 bg-neon-cyan/10" />
                       )}
                     </div>
                     
-                    {/* Glow effect for learning cards */}
-                    {isLearning && (
+                    {/* Glow pulse effect */}
+                    {(isCorrect || isIncorrect) && (
                       <motion.div
-                        className="absolute inset-0 rounded-xl"
+                        className="absolute inset-0 rounded-2xl"
                         style={{
-                          background: 'radial-gradient(circle, rgba(34, 197, 94, 0.4) 0%, transparent 70%)',
+                          background: isCorrect
+                            ? 'radial-gradient(circle, rgba(34, 197, 94, 0.5) 0%, transparent 70%)'
+                            : 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 0%, transparent 70%)',
                         }}
                         animate={{
-                          opacity: [0.4, 0.8, 0.4],
-                          scale: [1, 1.2, 1],
+                          opacity: [0.5, 1, 0.5],
+                          scale: [1, 1.3, 1],
                         }}
                         transition={{
-                          duration: 1,
+                          duration: 0.8,
                           repeat: Infinity,
                           ease: "easeInOut"
                         }}
                       />
+                    )}
+                    
+                    {/* Particle trail for correct/incorrect */}
+                    {(isCorrect || isIncorrect) && (
+                      <>
+                        {[...Array(8)].map((_, j) => (
+                          <motion.div
+                            key={j}
+                            className="absolute w-1.5 h-1.5 rounded-full"
+                            style={{
+                              background: isCorrect ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)',
+                              left: '50%',
+                              top: '50%',
+                            }}
+                            animate={{
+                              x: isCorrect 
+                                ? [0, Math.cos(j * 45 * Math.PI / 180) * 60]
+                                : [0, Math.cos(j * 45 * Math.PI / 180) * -60],
+                              y: [0, Math.sin(j * 45 * Math.PI / 180) * 60],
+                              opacity: [1, 0],
+                              scale: [1, 0],
+                            }}
+                            transition={{
+                              duration: 0.8,
+                              delay: j * 0.05,
+                              ease: "easeOut"
+                            }}
+                          />
+                        ))}
+                      </>
                     )}
                   </div>
                 </motion.div>
@@ -835,7 +918,7 @@ export const FlashcardSession: React.FC = () => {
           
           {/* Status text */}
           <motion.div
-            className="text-xl font-bold mb-2 text-neon-cyan"
+            className="text-2xl md:text-3xl font-bold mb-2 text-neon-cyan"
             animate={{ opacity: [0.7, 1, 0.7] }}
             transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
           >
@@ -843,7 +926,7 @@ export const FlashcardSession: React.FC = () => {
           </motion.div>
           
           <motion.div
-            className="text-slate-400 text-sm"
+            className="text-slate-400 text-sm md:text-base"
             animate={{ opacity: [0.5, 0.8, 0.5] }}
             transition={{ duration: 2, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
           >
