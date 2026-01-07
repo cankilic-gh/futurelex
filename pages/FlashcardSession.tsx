@@ -705,6 +705,18 @@ export const FlashcardSession: React.FC = () => {
       );
     }
     
+    // Card animation state for loop
+    const [animationCycle, setAnimationCycle] = useState(0);
+    
+    useEffect(() => {
+      if (isLoading) {
+        const interval = setInterval(() => {
+          setAnimationCycle((prev) => (prev + 1) % 3);
+        }, 2500);
+        return () => clearInterval(interval);
+      }
+    }, [isLoading]);
+    
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
         <Background />
@@ -721,9 +733,11 @@ export const FlashcardSession: React.FC = () => {
           >
             {/* Card deck - isometric fan layout */}
             {[...Array(12)].map((_, i) => {
-              const isLearning = i < 5; // First 5 cards are being learned
-              const isReview = i >= 5 && i < 8; // Next 3 are for review
-              const isNew = i >= 8; // Last 4 are new cards
+              // Cycle through: learning -> review -> new
+              const cyclePosition = (i + animationCycle * 4) % 12;
+              const isLearning = cyclePosition < 4; // Cards being learned
+              const isReview = cyclePosition >= 4 && cyclePosition < 7; // Cards for review
+              const isNew = cyclePosition >= 7; // New cards
               
               // Calculate rotation and position for fan effect
               const totalCards = 12;
@@ -739,35 +753,27 @@ export const FlashcardSession: React.FC = () => {
                     transformStyle: 'preserve-3d',
                     transformOrigin: 'center bottom',
                   }}
-                  initial={{
-                    rotateY: offset,
-                    rotateX: 15,
-                    translateZ: -zOffset,
-                    opacity: 1,
-                    scale: 0.8,
-                  }}
                   animate={isLearning ? {
-                    // Cards being learned - fly away with green glow
-                    y: [-100, -200],
-                    opacity: [1, 0],
-                    scale: [0.8, 0.3],
-                    rotateY: [offset, offset + 30],
-                    rotateX: [15, 45],
-                    filter: ['brightness(1)', 'brightness(2)'],
+                    // Cards being learned - fly away with green glow, then reset
+                    y: [0, -150, 0],
+                    opacity: [1, 0, 1],
+                    scale: [0.8, 0.2, 0.8],
+                    rotateY: [offset, offset + 45, offset],
+                    rotateX: [15, 60, 15],
                   } : {
                     // Cards staying - subtle pulse
                     y: [0, -5, 0],
-                    opacity: isReview ? [0.6, 0.8, 0.6] : [0.4, 0.6, 0.4],
+                    opacity: isReview ? [0.7, 0.9, 0.7] : [0.5, 0.7, 0.5],
                     scale: [0.8, 0.85, 0.8],
                     rotateY: offset,
                     rotateX: 15,
                   }}
                   transition={{
-                    duration: isLearning ? 1.5 : 2,
-                    repeat: isLearning ? 0 : Infinity,
-                    repeatDelay: isLearning ? 0 : 0.5,
-                    delay: isLearning ? i * 0.15 : 0,
-                    ease: isLearning ? "easeOut" : "easeInOut",
+                    duration: isLearning ? 2 : 2.5,
+                    repeat: Infinity,
+                    repeatDelay: isLearning ? 0.5 : 0,
+                    delay: isLearning ? (cyclePosition % 4) * 0.2 : 0,
+                    ease: isLearning ? "easeInOut" : "easeInOut",
                   }}
                 >
                   {/* Card */}
