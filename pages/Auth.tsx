@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Background } from '../components/Layout/Background';
 import { GlassButton } from '../components/ui/GlassButton';
 import { motion } from 'framer-motion';
-import { Cpu, Mail, Lock, ArrowRight } from 'lucide-react';
+import { Languages, Mail, Lock, ArrowRight } from 'lucide-react';
 
 export const Auth: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -58,7 +58,7 @@ export const Auth: React.FC = () => {
             }}
            >
             <div className="absolute inset-0 bg-gradient-to-b from-white/20 via-transparent to-transparent rounded-2xl pointer-events-none" />
-            <Cpu className="w-12 h-12 text-neon-cyan relative z-10" />
+            <Languages className="w-12 h-12 text-neon-cyan relative z-10" />
            </div>
         </motion.div>
 

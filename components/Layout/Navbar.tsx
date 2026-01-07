@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { GlassButton } from '../ui/GlassButton';
-import { LogOut, LayoutGrid, BookMarked, Cpu } from 'lucide-react';
+import { LogOut, LayoutGrid, BookMarked, Languages } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 
 export const Navbar: React.FC = () => {
@@ -15,7 +15,7 @@ export const Navbar: React.FC = () => {
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 group">
           <div className="p-2 bg-neon-cyan/10 rounded-lg border border-neon-cyan/20 group-hover:bg-neon-cyan/20 transition-colors">
-            <Cpu className="w-6 h-6 text-neon-cyan" />
+            <Languages className="w-6 h-6 text-neon-cyan" />
           </div>
           <span className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
             FutureLex

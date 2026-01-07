@@ -9,7 +9,7 @@ import { Navbar } from '../components/Layout/Navbar';
 import { Card } from '../components/Flashcard/Card';
 import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
-import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, Cpu, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const POOL_SIZE = 100;
