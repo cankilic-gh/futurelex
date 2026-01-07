@@ -873,7 +873,7 @@ export const FlashcardSession: React.FC = () => {
               )}
             </motion.button>
 
-            {/* Complete Button - PRIMARY ACTION - Larger, more prominent, glossy golden with celebration effect */}
+            {/* Complete Button - PRIMARY ACTION - Green tones with celebration effect */}
             <motion.button
               onClick={() => {
                 console.log("[BUTTON] Complete clicked, current state:", { isCompleted, isSaving, isCompleting, currentWordId: currentWord?.id });
@@ -881,39 +881,23 @@ export const FlashcardSession: React.FC = () => {
               }}
               disabled={isSaving || isCompleting || !currentWord}
               key={`complete-${currentWord?.id}-${isCompleted}-${completedWordIdsKey}`}
-              whileHover={{ scale: 1.1, rotate: [0, -5, 5, 0] }}
-              whileTap={{ scale: 0.9 }}
+              whileTap={{ scale: 0.95 }}
               animate={isCompleting ? {
                 scale: [1, 1.2, 1],
                 rotate: [0, 360]
               } : {}}
               transition={{ 
-                hover: { duration: 0.3 },
                 animate: { duration: 0.6, ease: "easeOut" }
               }}
-              className={`flex-shrink-0 relative p-5 sm:p-6 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
+              className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
                 isCompleted || isCompleting
                   ? 'bg-green-500/30 border-green-500/80 text-green-300 shadow-[0_0_30px_rgba(34,197,94,0.6)]'
-                  : 'bg-gradient-to-br from-golden-400 via-golden-500 to-golden-600 border-golden-400/80 text-slate-900 shadow-[0_8px_30px_rgba(255,215,0,0.5),inset_0_2px_0_rgba(255,255,255,0.4)] hover:shadow-[0_10px_40px_rgba(255,215,0,0.7),inset_0_2px_0_rgba(255,255,255,0.5)]'
+                  : 'bg-gradient-to-br from-green-500/20 via-green-600/30 to-green-700/40 border-green-500/60 text-green-400 shadow-[0_4px_20px_rgba(34,197,94,0.3)]'
               }`}
               style={isCompleted || isCompleting ? {} : {
-                background: 'linear-gradient(135deg, #FFE55C 0%, #FFD700 50%, #E6C200 100%)',
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.3) 50%, rgba(21, 128, 61, 0.4) 100%)',
               }}
             >
-              {/* Glossy highlight for golden button */}
-              {!(isCompleted || isCompleting) && (
-                <motion.div 
-                  className="absolute inset-0 bg-gradient-to-b from-white/40 via-transparent to-transparent rounded-2xl pointer-events-none"
-                  animate={{
-                    opacity: [0.3, 0.5, 0.3],
-                  }}
-                  transition={{
-                    duration: 2,
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                />
-              )}
               {/* Celebration particles effect when completing */}
               {isCompleting && (
                 <>
@@ -943,11 +927,11 @@ export const FlashcardSession: React.FC = () => {
                 </>
               )}
               {isCompleting ? (
-                <CheckCircle2 size={28} className="relative z-10 sm:w-8 sm:h-8" />
+                <CheckCircle2 size={22} className="relative z-10 sm:w-6 sm:h-6" />
               ) : isCompleted ? (
-                <CheckCircle size={28} className="relative z-10 sm:w-8 sm:h-8" />
+                <CheckCircle size={22} className="relative z-10 sm:w-6 sm:h-6" />
               ) : (
-                <CheckCircle size={28} className="relative z-10 sm:w-8 sm:h-8" />
+                <CheckCircle size={22} className="relative z-10 sm:w-6 sm:h-6" />
               )}
             </motion.button>
 
