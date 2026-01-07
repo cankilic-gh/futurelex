@@ -9,6 +9,39 @@ import { UserSavedWord, Word } from '../types';
 import { Trash2, BookMarked, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+// Cache configuration
+const CACHE_KEY_DASHBOARD = 'futurelex_dashboard_words_cache';
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Cache utility functions
+function getCachedWords(): { words: UserSavedWord[], timestamp: number } | null {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY_DASHBOARD);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return { words: parsed.words || [], timestamp: parsed.timestamp || 0 };
+  } catch (err) {
+    console.error('[CACHE] Error reading dashboard cache:', err);
+    return null;
+  }
+}
+
+function setCachedWords(words: UserSavedWord[]): void {
+  try {
+    const data = {
+      words,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(CACHE_KEY_DASHBOARD, JSON.stringify(data));
+  } catch (err) {
+    console.error('[CACHE] Error writing dashboard cache:', err);
+  }
+}
+
+function isCacheValid(timestamp: number): boolean {
+  return Date.now() - timestamp < CACHE_TTL;
+}
+
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -19,6 +52,18 @@ export const Dashboard: React.FC = () => {
     if (!user) return;
 
     const fetchWords = async () => {
+      // PROGRESSIVE LOADING: Load from cache first for instant display
+      const cached = getCachedWords();
+      let useCache = false;
+
+      if (cached && isCacheValid(cached.timestamp)) {
+        setSavedWords(cached.words);
+        setLoading(false); // Show words immediately
+        useCache = true;
+        console.log('[CACHE] Using cached dashboard words:', { count: cached.words.length });
+      }
+
+      // Fetch from Firebase in background (always fetch to keep cache fresh)
       try {
         const q = query(collection(db, 'users', user.uid, 'saved_words'));
         const querySnapshot = await getDocs(q);
@@ -26,11 +71,24 @@ export const Dashboard: React.FC = () => {
           id: doc.id,
           ...doc.data()
         })) as UserSavedWord[];
+        
+        console.log('[FETCH] Loaded dashboard words from Firebase:', { count: words.length });
+        
+        // Update cache
+        setCachedWords(words);
+        
+        // Update state with fresh data
         setSavedWords(words);
+        
+        if (!useCache) {
+          setLoading(false);
+        }
       } catch (err) {
         console.error("Failed to fetch saved words", err);
-      } finally {
-        setLoading(false);
+        // If cache was used, we already showed words, so just log error
+        if (!useCache) {
+          setLoading(false);
+        }
       }
     };
 
@@ -41,7 +99,10 @@ export const Dashboard: React.FC = () => {
     if (!user) return;
     try {
       await deleteDoc(doc(db, 'users', user.uid, 'saved_words', id));
-      setSavedWords(prev => prev.filter(w => w.id !== id));
+      const updatedWords = savedWords.filter(w => w.id !== id);
+      setSavedWords(updatedWords);
+      // Update cache after removal
+      setCachedWords(updatedWords);
     } catch (err) {
       console.error("Failed to remove word", err);
     }
