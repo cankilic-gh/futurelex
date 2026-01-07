@@ -881,6 +881,7 @@ export const FlashcardSession: React.FC = () => {
               }}
               disabled={isSaving || isCompleting || !currentWord}
               key={`complete-${currentWord?.id}-${isCompleted}-${completedWordIdsKey}`}
+              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               animate={isCompleting ? {
                 scale: [1, 1.2, 1],
@@ -892,7 +893,7 @@ export const FlashcardSession: React.FC = () => {
               className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
                 isCompleted || isCompleting
                   ? 'bg-green-500/30 border-green-500/80 text-green-300 shadow-[0_0_30px_rgba(34,197,94,0.6)]'
-                  : 'bg-gradient-to-br from-green-500/20 via-green-600/30 to-green-700/40 border-green-500/60 text-green-400 shadow-[0_4px_20px_rgba(34,197,94,0.3)]'
+                  : 'bg-gradient-to-br from-green-500/20 via-green-600/30 to-green-700/40 border-green-500/60 text-green-400 shadow-[0_4px_20px_rgba(34,197,94,0.3)] hover:bg-green-500/10 hover:border-green-500/80 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]'
               }`}
               style={isCompleted || isCompleting ? {} : {
                 background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.3) 50%, rgba(21, 128, 61, 0.4) 100%)',
