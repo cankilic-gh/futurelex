@@ -83,7 +83,6 @@ export const Dashboard: React.FC = () => {
           {savedWords.length > 0 && (
             <motion.button
               onClick={startReview}
-              whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className="flex items-center gap-2 px-6 py-3 bg-gradient-to-br from-neon-cyan/20 via-neon-cyan/30 to-neon-cyan/40 text-neon-cyan border-2 border-neon-cyan/60 rounded-2xl font-semibold shadow-[0_4px_20px_rgba(0,243,255,0.3),inset_0_1px_0_rgba(255,255,255,0.1)] hover:bg-neon-cyan/30 hover:border-neon-cyan/80 hover:shadow-[0_6px_30px_rgba(0,243,255,0.5),inset_0_1px_0_rgba(255,255,255,0.15)] backdrop-blur-xl transition-all whitespace-nowrap relative overflow-hidden"
               style={{
