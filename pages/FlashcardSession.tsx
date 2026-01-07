@@ -27,6 +27,18 @@ export const FlashcardSession: React.FC = () => {
   const [isCompleting, setIsCompleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const { user } = useAuth();
+  
+  // Card animation cycle for loader - must be at top level (before any early returns)
+  const [cardCycle, setCardCycle] = useState(0);
+  
+  useEffect(() => {
+    if (isLoading) {
+      const interval = setInterval(() => {
+        setCardCycle((prev) => prev + 1);
+      }, 2500); // Slower: 2.5 seconds per card
+      return () => clearInterval(interval);
+    }
+  }, [isLoading]);
 
   // Fetch saved and completed words, and initialize word pool
   useEffect(() => {
@@ -716,18 +728,6 @@ export const FlashcardSession: React.FC = () => {
         </div>
       );
     }
-    
-    // Card animation cycle - infinite loop with alternating correct/incorrect
-    const [cardCycle, setCardCycle] = useState(0);
-    
-    useEffect(() => {
-      if (isLoading) {
-        const interval = setInterval(() => {
-          setCardCycle((prev) => prev + 1);
-        }, 2500); // Slower: 2.5 seconds per card
-        return () => clearInterval(interval);
-      }
-    }, [isLoading]);
     
     // Card states: We always show 2 cards
     // - Center card (always visible)
