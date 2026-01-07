@@ -705,127 +705,144 @@ export const FlashcardSession: React.FC = () => {
       );
     }
     
-    // Creative loading states
-    const loadingStates = ["Translating...", "Learning...", "Speaking..."];
-    const [currentState, setCurrentState] = useState(0);
-    
-    useEffect(() => {
-      if (isLoading) {
-        const interval = setInterval(() => {
-          setCurrentState((prev) => (prev + 1) % loadingStates.length);
-        }, 2000);
-        return () => clearInterval(interval);
-      }
-    }, [isLoading]);
-    
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
         <Background />
         <Navbar />
         <motion.div 
-          className="text-center max-w-md px-4"
+          className="text-center max-w-2xl px-4"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
         >
-          {/* Animated progress circle */}
-          <div className="relative w-24 h-24 mx-auto mb-6">
-            <motion.div
-              className="absolute inset-0 border-4 border-neon-cyan/20 rounded-full"
-            />
-            <motion.div
-              className="absolute inset-0 border-4 border-transparent border-t-neon-cyan rounded-full"
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-            />
-            {/* Inner pulsing circle */}
-            <motion.div
-              className="absolute inset-4 border-2 border-neon-cyan/40 rounded-full"
-              animate={{
-                scale: [1, 1.2, 1],
-                opacity: [0.4, 0.8, 0.4],
-              }}
-              transition={{
-                duration: 2,
-                repeat: Infinity,
-                ease: "easeInOut"
-              }}
-            />
-            {/* Center icon */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <motion.div
-                animate={{
-                  scale: [1, 1.1, 1],
-                  rotate: [0, 5, -5, 0],
-                }}
-                transition={{
-                  duration: 2,
-                  repeat: Infinity,
-                  ease: "easeInOut"
-                }}
-              >
-                <Cpu className="w-8 h-8 text-neon-cyan" />
-              </motion.div>
-            </div>
+          {/* Isometric Card Deck Animation */}
+          <div 
+            className="relative w-full h-64 mb-8 flex items-center justify-center"
+            style={{ perspective: '1000px' }}
+          >
+            {/* Card deck - isometric fan layout */}
+            {[...Array(12)].map((_, i) => {
+              const isLearning = i < 5; // First 5 cards are being learned
+              const isReview = i >= 5 && i < 8; // Next 3 are for review
+              const isNew = i >= 8; // Last 4 are new cards
+              
+              // Calculate rotation and position for fan effect
+              const totalCards = 12;
+              const centerIndex = totalCards / 2;
+              const offset = (i - centerIndex) * 8; // Degrees
+              const zOffset = Math.abs(i - centerIndex) * 8; // Depth
+              
+              return (
+                <motion.div
+                  key={i}
+                  className="absolute"
+                  style={{
+                    transformStyle: 'preserve-3d',
+                    transformOrigin: 'center bottom',
+                  }}
+                  initial={{
+                    rotateY: offset,
+                    rotateX: 15,
+                    translateZ: -zOffset,
+                    opacity: 1,
+                    scale: 0.8,
+                  }}
+                  animate={isLearning ? {
+                    // Cards being learned - fly away with green glow
+                    y: [-100, -200],
+                    opacity: [1, 0],
+                    scale: [0.8, 0.3],
+                    rotateY: [offset, offset + 30],
+                    rotateX: [15, 45],
+                    filter: ['brightness(1)', 'brightness(2)'],
+                  } : {
+                    // Cards staying - subtle pulse
+                    y: [0, -5, 0],
+                    opacity: isReview ? [0.6, 0.8, 0.6] : [0.4, 0.6, 0.4],
+                    scale: [0.8, 0.85, 0.8],
+                    rotateY: offset,
+                    rotateX: 15,
+                  }}
+                  transition={{
+                    duration: isLearning ? 1.5 : 2,
+                    repeat: isLearning ? 0 : Infinity,
+                    repeatDelay: isLearning ? 0 : 0.5,
+                    delay: isLearning ? i * 0.15 : 0,
+                    ease: isLearning ? "easeOut" : "easeInOut",
+                  }}
+                >
+                  {/* Card */}
+                  <div
+                    className="w-20 h-28 rounded-xl border-2 relative overflow-hidden backdrop-blur-xl"
+                    style={{
+                      background: isLearning
+                        ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.3) 0%, rgba(22, 163, 74, 0.4) 100%)'
+                        : isReview
+                          ? 'linear-gradient(135deg, rgba(255, 0, 85, 0.2) 0%, rgba(230, 57, 107, 0.3) 100%)'
+                          : 'linear-gradient(135deg, rgba(0, 243, 255, 0.2) 0%, rgba(0, 243, 255, 0.3) 100%)',
+                      borderColor: isLearning
+                        ? 'rgba(34, 197, 94, 0.6)'
+                        : isReview
+                          ? 'rgba(255, 0, 85, 0.6)'
+                          : 'rgba(0, 243, 255, 0.5)',
+                      boxShadow: isLearning
+                        ? '0 8px 20px rgba(34, 197, 94, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+                        : isReview
+                          ? '0 8px 20px rgba(255, 0, 85, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)'
+                          : '0 8px 20px rgba(0, 243, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+                      transform: `rotateY(${offset}deg) rotateX(15deg)`,
+                    }}
+                  >
+                    {/* Card content */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
+                      {isLearning ? (
+                        <CheckCircle className="w-6 h-6 text-green-400" />
+                      ) : isReview ? (
+                        <BookmarkCheck className="w-6 h-6 text-neon-pink" />
+                      ) : (
+                        <div className="w-4 h-4 rounded border border-neon-cyan/50" />
+                      )}
+                    </div>
+                    
+                    {/* Glow effect for learning cards */}
+                    {isLearning && (
+                      <motion.div
+                        className="absolute inset-0 rounded-xl"
+                        style={{
+                          background: 'radial-gradient(circle, rgba(34, 197, 94, 0.4) 0%, transparent 70%)',
+                        }}
+                        animate={{
+                          opacity: [0.4, 0.8, 0.4],
+                          scale: [1, 1.2, 1],
+                        }}
+                        transition={{
+                          duration: 1,
+                          repeat: Infinity,
+                          ease: "easeInOut"
+                        }}
+                      />
+                    )}
+                  </div>
+                </motion.div>
+              );
+            })}
           </div>
           
-          {/* Animated text states */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentState}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              transition={{ duration: 0.3 }}
-              className="text-2xl font-bold mb-2 text-neon-cyan"
-            >
-              {loadingStates[currentState]}
-            </motion.div>
-          </AnimatePresence>
-          
+          {/* Status text */}
           <motion.div
-            className="text-slate-400 text-sm mb-6"
-            animate={{ opacity: [0.5, 1, 0.5] }}
+            className="text-xl font-bold mb-2 text-neon-cyan"
+            animate={{ opacity: [0.7, 1, 0.7] }}
             transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
           >
-            Initializing word pool...
+            Preparing your learning deck...
           </motion.div>
           
-          {/* Progress bar */}
-          <div className="w-full max-w-xs mx-auto h-1 bg-slate-800/50 rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-gradient-to-r from-neon-cyan/50 via-neon-cyan to-neon-cyan/50"
-              initial={{ width: "0%" }}
-              animate={{ width: "100%" }}
-              transition={{
-                duration: 3,
-                repeat: Infinity,
-                ease: "easeInOut"
-              }}
-            />
-          </div>
-          
-          {/* Floating particles */}
-          {[...Array(8)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute w-1 h-1 bg-neon-cyan rounded-full"
-              style={{
-                left: `${20 + i * 10}%`,
-                top: `${30 + (i % 3) * 20}%`,
-              }}
-              animate={{
-                y: [0, -20, 0],
-                opacity: [0.3, 0.8, 0.3],
-                scale: [0.5, 1, 0.5],
-              }}
-              transition={{
-                duration: 2 + i * 0.2,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: i * 0.1,
-              }}
-            />
-          ))}
+          <motion.div
+            className="text-slate-400 text-sm"
+            animate={{ opacity: [0.5, 0.8, 0.5] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+          >
+            {isLoading ? 'Loading words...' : 'Initializing word pool...'}
+          </motion.div>
         </motion.div>
       </div>
     );
