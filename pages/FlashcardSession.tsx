@@ -983,15 +983,19 @@ export const FlashcardSession: React.FC = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="text-center"
+            className="text-center flex flex-col items-center"
           >
-            <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
+            <CheckCircle className="w-16 h-16 text-green-400 mb-4" />
             <h2 className="text-3xl font-bold text-white mb-2">Review Complete!</h2>
             <p className="text-slate-400 mb-6">You've reviewed all your saved words.</p>
             <Link to="/dashboard">
-              <GlassButton>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                className="px-6 py-3 rounded-xl bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 transition-all"
+              >
                 Back to Saved Words
-              </GlassButton>
+              </motion.button>
             </Link>
           </motion.div>
         </div>
