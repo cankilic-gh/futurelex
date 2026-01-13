@@ -984,6 +984,30 @@ export const FlashcardSession: React.FC = () => {
       );
     }
 
+    // Review mode: all review cards completed
+    if (!isLoading && words.length === 0 && isReviewMode) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center px-4">
+          <Background />
+          <Navbar />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center"
+          >
+            <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
+            <h2 className="text-3xl font-bold text-white mb-2">Review Complete!</h2>
+            <p className="text-slate-400 mb-6">You've reviewed all your saved words.</p>
+            <Link to="/dashboard">
+              <GlassButton>
+                Back to Saved Words
+              </GlassButton>
+            </Link>
+          </motion.div>
+        </div>
+      );
+    }
+
     // No words available for this language pair
     if (!isLoading && words.length === 0 && completedWordIds.length === 0 && !isReviewMode) {
       const sourceLang = activePlan ? getLanguageByCode(activePlan.sourceLanguage) : null;
