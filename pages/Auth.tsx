@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Background } from '../components/Layout/Background';
-import { GlassButton } from '../components/ui/GlassButton';
 import { motion } from 'framer-motion';
 import { Languages, Mail, Lock, ArrowRight } from 'lucide-react';
 
@@ -110,10 +109,15 @@ export const Auth: React.FC = () => {
             />
           </motion.div>
 
-          <GlassButton type="submit" className="w-full mt-6">
+          <motion.button
+            type="submit"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-white text-slate-900 font-medium hover:bg-slate-100 transition-all"
+          >
             {isLogin ? 'Enter System' : 'Create Account'}
-            <ArrowRight size={18} className="flex-shrink-0" />
-          </GlassButton>
+            <ArrowRight size={18} />
+          </motion.button>
         </form>
 
         <div className="mt-6 text-center">
