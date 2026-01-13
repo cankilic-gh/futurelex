@@ -87,7 +87,7 @@ export const LocalFirstProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       targetLanguage,
       name: customName || generatePlanName(sourceLanguage, targetLanguage),
       createdAt: new Date(),
-      isActive: plans.length === 0,
+      isActive: true, // Always active - new plan becomes current
       progress: {
         wordsLearned: 0,
         currentLevel: 1,
@@ -95,16 +95,17 @@ export const LocalFirstProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       },
     };
 
-    // Update local state immediately
-    const newPlans = [...plans, newPlan];
+    // Update all plans - deactivate others, add new one
+    const newPlans = [
+      ...plans.map(p => ({ ...p, isActive: false })),
+      newPlan
+    ];
     setPlans(newPlans);
     LocalStorage.savePlans(newPlans);
 
-    // Set as active if first plan
-    if (newPlan.isActive) {
-      setActivePlanId(newPlan.id);
-      LocalStorage.setActivePlanId(newPlan.id);
-    }
+    // Always set new plan as active
+    setActivePlanId(newPlan.id);
+    LocalStorage.setActivePlanId(newPlan.id);
 
     // Mark for background sync
     LocalStorage.markPendingSync({ type: 'CREATE_PLAN', data: newPlan });

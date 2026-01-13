@@ -148,7 +148,7 @@ export const FlashcardSession: React.FC = () => {
   const isReviewMode = searchParams.get('review') === 'true';
 
   // LOCAL FIRST - Get activePlan first so we can initialize state from cache
-  const { activePlan } = useLocalFirst();
+  const { activePlan, updatePlanProgress } = useLocalFirst();
   // DEVICE-SPECIFIC: Each device gets unique user ID (prevents data mixing between guests)
   const user = useMemo(() => getLocalUser(), []);
 
@@ -511,8 +511,8 @@ export const FlashcardSession: React.FC = () => {
           });
         }, 0);
         
-        // Refill pool asynchronously (only if not in review mode)
-        if (!isReviewMode && filteredWords.length < POOL_SIZE) {
+        // Refill pool asynchronously when it drops below half (only if not in review mode)
+        if (!isReviewMode && filteredWords.length < 50) {
           // CRITICAL: Capture completedWordIds at the time of setTimeout to avoid closure issues
           const currentCompletedIds = [...completedWordIds]; // Create a copy
           setTimeout(() => {
@@ -807,7 +807,7 @@ export const FlashcardSession: React.FC = () => {
           console.log("[TOGGLE COMPLETE] INSIDE setCompletedWordIds callback, prev:", prev, "word.id:", word.id);
           const alreadyIncluded = prev.includes(word.id);
           console.log("[TOGGLE COMPLETE] Word already in completed?", alreadyIncluded);
-          
+
           if (alreadyIncluded) {
             console.log("[TOGGLE COMPLETE] Word already in completed, but creating new array anyway for React");
             // CRITICAL: Always return a new array reference so React detects the change
@@ -815,15 +815,21 @@ export const FlashcardSession: React.FC = () => {
             console.log("[TOGGLE COMPLETE] Returning new array (same content):", newArray);
             return newArray;
           }
-          
+
           const newArray = [...prev, word.id];
-          console.log("[TOGGLE COMPLETE] State updated - added (optimistic):", { 
-            newSize: newArray.length, 
+          console.log("[TOGGLE COMPLETE] State updated - added (optimistic):", {
+            newSize: newArray.length,
             wordId: word.id,
             prevSize: prev.length,
             prevArray: prev,
             newArrayContents: newArray
           });
+
+          // Update plan progress with new count
+          if (activePlan) {
+            updatePlanProgress(activePlan.id, { wordsLearned: newArray.length });
+          }
+
           return newArray;
         });
         
@@ -1295,10 +1301,6 @@ export const FlashcardSession: React.FC = () => {
               </motion.button>
             </div>
 
-            {/* Progress indicator */}
-            <div className="mt-2.5 text-[11px] text-slate-600">
-              {currentIndex + 1} / {words.length}
-            </div>
           </div>
         </motion.div>
       </main>
