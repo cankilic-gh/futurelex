@@ -1144,55 +1144,17 @@ export const FlashcardSession: React.FC = () => {
           </motion.div>
         </div>
 
-        <div 
-          className="w-full max-w-md h-[450px] relative flex items-center justify-center" 
-          style={{ position: 'relative', zIndex: 10, pointerEvents: 'none' }}
+        <div
+          className="w-full max-w-md h-[450px] relative flex items-center justify-center"
+          style={{ position: 'relative', zIndex: 10 }}
         >
-          <AnimatePresence initial={false} custom={direction}>
-            <motion.div
-              key={currentIndex}
-              custom={direction}
-              variants={{
-                // GENTLE TRANSITIONS - softer, shorter, no rotation or blur
-                enter: (direction: number) => ({
-                  x: direction > 0 ? 200 : -200,
-                  opacity: 0,
-                  scale: 0.96,
-                }),
-                center: {
-                  zIndex: 10,
-                  x: 0,
-                  opacity: 1,
-                  scale: 1,
-                },
-                exit: (direction: number) => ({
-                  zIndex: 0,
-                  x: direction < 0 ? 200 : -200,
-                  opacity: 0,
-                  scale: 0.96,
-                })
-              }}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{
-                x: { type: "spring", stiffness: 200, damping: 25 },
-                opacity: { duration: 0.25, ease: "easeOut" },
-                scale: { duration: 0.25, ease: "easeOut" }
-              }}
-              className="absolute w-full flex justify-center"
-              style={{ position: 'absolute', zIndex: 10, pointerEvents: 'auto' }}
-            >
-              {currentWord && (
-                <Card
-                  key={currentWord.id}
-                  word={currentWord}
-                  isSaved={isSaved}
-                  isCompleted={isCompleted}
-                />
-              )}
-            </motion.div>
-          </AnimatePresence>
+          {currentWord && (
+            <Card
+              word={currentWord}
+              isSaved={isSaved}
+              isCompleted={isCompleted}
+            />
+          )}
         </div>
 
         {/* Floating Control Bar - Fixed at bottom, centered */}
