@@ -1185,7 +1185,7 @@ export const FlashcardSession: React.FC = () => {
             >
               {currentWord && (
                 <Card
-                  key={`${currentWord.id}-${isSaved}-${isCompleted}`}
+                  key={currentWord.id}
                   word={currentWord}
                   isSaved={isSaved}
                   isCompleted={isCompleted}
