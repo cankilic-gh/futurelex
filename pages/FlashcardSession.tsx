@@ -948,8 +948,8 @@ export const FlashcardSession: React.FC = () => {
     }
   }, [words.length, currentIndex]);
 
-  // Show loading state while words are being loaded
-  if (isLoading || (words.length === 0 && !isReviewMode)) {
+  // Show loading state or empty state
+  if (isLoading || words.length === 0) {
     // Check if all words are completed (only if not in review mode and not currently loading)
     if (!isLoading && words.length === 0 && completedWordIds.length > 0 && !isReviewMode) {
       return (
