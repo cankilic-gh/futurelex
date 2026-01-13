@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getWordPool, getAllAvailableWords } from '../services/data';
-import { useAuth } from '../context/AuthContext';
+import { getLanguageByCode } from '../services/languages';
+import { useLocalFirst } from '../context/LocalFirstContext';
+import { LocalStorage } from '../services/localStorage';
+// Firebase imports kept for now - will use local storage as primary
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, getDocs, collection, query, serverTimestamp } from 'firebase/firestore';
 import { Background } from '../components/Layout/Background';
@@ -9,14 +12,19 @@ import { Navbar } from '../components/Layout/Navbar';
 import { Card } from '../components/Flashcard/Card';
 import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
-import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, X, Database, Cloud, Sparkles, Layers } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 const POOL_SIZE = 100;
 
+// DEVICE-SPECIFIC USER ID - Each device gets unique ID to prevent data mixing
+// This replaces the old 'local_user' which caused all guests to share the same Firebase path
+const getLocalUser = () => ({ uid: LocalStorage.getDeviceId() });
+
 // Cache configuration
 const CACHE_KEY_SAVED = 'futurelex_saved_words_cache';
 const CACHE_KEY_COMPLETED = 'futurelex_completed_words_cache';
+const CACHE_KEY_DASHBOARD = 'futurelex_dashboard_words_cache'; // Same key as Dashboard.tsx
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Cache utility functions
@@ -48,37 +56,152 @@ function isCacheValid(timestamp: number): boolean {
   return Date.now() - timestamp < CACHE_TTL;
 }
 
+// Dashboard cache functions (stores full word objects, same format as Dashboard.tsx)
+interface DashboardWord {
+  id: string;
+  wordId?: string;
+  planId: string;
+  sourceText: string;
+  targetText: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  example?: string;
+  type?: string;
+  level?: number;
+  pronunciation?: string;
+  english?: string;
+  turkish?: string;
+}
+
+function getDashboardCache(planId: string): { words: DashboardWord[], timestamp: number } | null {
+  try {
+    const cacheKey = `${CACHE_KEY_DASHBOARD}_${planId}`;
+    const cached = localStorage.getItem(cacheKey);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached);
+    return { words: parsed.words || [], timestamp: parsed.timestamp || 0 };
+  } catch (err) {
+    console.error('[CACHE] Error reading dashboard cache:', err);
+    return null;
+  }
+}
+
+function setDashboardCache(planId: string, words: DashboardWord[]): void {
+  try {
+    const cacheKey = `${CACHE_KEY_DASHBOARD}_${planId}`;
+    const data = {
+      words,
+      timestamp: Date.now()
+    };
+    localStorage.setItem(cacheKey, JSON.stringify(data));
+    console.log('[CACHE] Dashboard cache updated:', { planId, count: words.length });
+  } catch (err) {
+    console.error('[CACHE] Error writing dashboard cache:', err);
+  }
+}
+
+function addWordToDashboardCache(planId: string, word: Word, activePlan: any): void {
+  const cached = getDashboardCache(planId);
+  const existingWords = cached?.words || [];
+
+  // Check if word already exists
+  const exists = existingWords.some(w => w.id === word.id || w.wordId === word.id);
+  if (exists) {
+    console.log('[CACHE] Word already in dashboard cache:', word.id);
+    return;
+  }
+
+  // Create dashboard word object
+  const dashboardWord: DashboardWord = {
+    id: word.id,
+    wordId: word.id,
+    planId: planId,
+    sourceText: word.sourceText || word.english || '',
+    targetText: word.targetText || word.turkish || '',
+    sourceLanguage: activePlan.sourceLanguage,
+    targetLanguage: activePlan.targetLanguage,
+    example: word.example || '',
+    type: word.type || 'noun',
+    level: word.level || 1,
+    english: word.english || word.sourceText,
+    turkish: word.turkish || word.targetText,
+  };
+
+  if (word.pronunciation) {
+    dashboardWord.pronunciation = word.pronunciation;
+  }
+
+  const updatedWords = [...existingWords, dashboardWord];
+  setDashboardCache(planId, updatedWords);
+}
+
+function removeWordFromDashboardCache(planId: string, wordId: string): void {
+  const cached = getDashboardCache(planId);
+  if (!cached) return;
+
+  const updatedWords = cached.words.filter(w => w.id !== wordId && w.wordId !== wordId);
+  setDashboardCache(planId, updatedWords);
+}
+
 export const FlashcardSession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const isReviewMode = searchParams.get('review') === 'true';
+
+  // LOCAL FIRST - Get activePlan first so we can initialize state from cache
+  const { activePlan } = useLocalFirst();
+  // DEVICE-SPECIFIC: Each device gets unique user ID (prevents data mixing between guests)
+  const user = useMemo(() => getLocalUser(), []);
+
+  // CRITICAL FIX: Initialize state from cache to prevent data loss on refresh
+  // This ensures saved/completed words are immediately available without waiting for Firebase
+  const [savedWordIds, setSavedWordIds] = useState<string[]>(() => {
+    if (!activePlan) return [];
+    const cached = getCachedWordIds(`${CACHE_KEY_SAVED}_${activePlan.id}`);
+    console.log('[INIT] Loaded savedWordIds from cache:', cached?.ids?.length || 0);
+    return cached?.ids || [];
+  });
+
+  const [completedWordIds, setCompletedWordIds] = useState<string[]>(() => {
+    if (!activePlan) return [];
+    const cached = getCachedWordIds(`${CACHE_KEY_COMPLETED}_${activePlan.id}`);
+    console.log('[INIT] Loaded completedWordIds from cache:', cached?.ids?.length || 0);
+    return cached?.ids || [];
+  });
+
   const [words, setWords] = useState<Word[]>([]);
-  // CRITICAL: Use Array instead of Set - React doesn't detect Set changes properly
-  const [savedWordIds, setSavedWordIds] = useState<string[]>([]);
-  const [completedWordIds, setCompletedWordIds] = useState<string[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [direction, setDirection] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isCompleting, setIsCompleting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const { user } = useAuth();
-  
-  // Card animation cycle for loader - must be at top level (before any early returns)
-  const [cardCycle, setCardCycle] = useState(0);
-  
+  const [loadingStage, setLoadingStage] = useState<'init' | 'cache' | 'firebase' | 'pool' | 'done'>('init');
+
+  // CRITICAL: Reload from cache when activePlan changes (useState initializer only runs once)
   useEffect(() => {
-    if (isLoading) {
-      const interval = setInterval(() => {
-        setCardCycle((prev) => prev + 1);
-      }, 2500); // Slower: 2.5 seconds per card
-      return () => clearInterval(interval);
+    if (!activePlan) return;
+
+    const cachedSaved = getCachedWordIds(`${CACHE_KEY_SAVED}_${activePlan.id}`);
+    const cachedCompleted = getCachedWordIds(`${CACHE_KEY_COMPLETED}_${activePlan.id}`);
+
+    if (cachedSaved?.ids) {
+      setSavedWordIds(cachedSaved.ids);
+      console.log('[PLAN_CHANGE] Reloaded savedWordIds from cache:', cachedSaved.ids.length);
     }
-  }, [isLoading]);
+    if (cachedCompleted?.ids) {
+      setCompletedWordIds(cachedCompleted.ids);
+      console.log('[PLAN_CHANGE] Reloaded completedWordIds from cache:', cachedCompleted.ids.length);
+    }
+  }, [activePlan?.id]);
 
   // Fetch saved and completed words, and initialize word pool
   useEffect(() => {
-    if (!user) return;
+    if (!user || !activePlan) {
+      setIsLoading(false);
+      return;
+    }
 
     const fetchUserWords = async () => {
+      setLoadingStage('init');
       try {
         // In review mode, load words from sessionStorage first
         if (isReviewMode) {
@@ -100,9 +223,12 @@ export const FlashcardSession: React.FC = () => {
           // If no review words, fall through to normal loading
         }
 
-        // PROGRESSIVE LOADING: Load from cache first for instant display
-        const cachedSaved = getCachedWordIds(CACHE_KEY_SAVED);
-        const cachedCompleted = getCachedWordIds(CACHE_KEY_COMPLETED);
+        // PROGRESSIVE LOADING: Load from cache first for instant display (plan-specific)
+        setLoadingStage('cache');
+        const planCacheKeySaved = `${CACHE_KEY_SAVED}_${activePlan.id}`;
+        const planCacheKeyCompleted = `${CACHE_KEY_COMPLETED}_${activePlan.id}`;
+        const cachedSaved = getCachedWordIds(planCacheKeySaved);
+        const cachedCompleted = getCachedWordIds(planCacheKeyCompleted);
         
         let savedIds: string[] = [];
         let completedIds: string[] = [];
@@ -125,22 +251,27 @@ export const FlashcardSession: React.FC = () => {
           setSavedWordIds(savedIds);
           setCompletedWordIds(completedIds);
           
-          // Load word pool immediately with cached data
+          // Load word pool immediately with cached data (plan-specific)
           if (!isReviewMode) {
             const completedIdsSet = new Set(completedIds);
-            const pool = getWordPool(completedIdsSet, POOL_SIZE);
+            const pool = getWordPool(
+              activePlan.sourceLanguage,
+              activePlan.targetLanguage,
+              completedIdsSet,
+              POOL_SIZE
+            );
             setWords(pool);
             setIsLoading(false); // Show words immediately
           }
         }
 
         // Fetch from Firebase in background (always fetch to keep cache fresh)
-        // Note: Firestore doesn't support field selection in queries, but we only process wordId
-        // to minimize memory usage and processing time
+        // Plan-specific collections
+        setLoadingStage('firebase');
         try {
           const [savedSnapshot, completedSnapshot] = await Promise.all([
-            getDocs(query(collection(db, 'users', user.uid, 'saved_words'))),
-            getDocs(query(collection(db, 'users', user.uid, 'completed_words')))
+            getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words'))),
+            getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words')))
           ]);
 
           // Optimization: Process only wordId field from documents (ignore other fields like timestamps)
@@ -164,32 +295,50 @@ export const FlashcardSession: React.FC = () => {
           console.log("[FETCH] Loaded saved words from Firebase:", { count: freshSavedIds.length });
           console.log("[FETCH] Loaded completed words from Firebase:", { count: freshCompletedIds.length });
 
-          // Update cache
-          setCachedWordIds(CACHE_KEY_SAVED, freshSavedIds);
-          setCachedWordIds(CACHE_KEY_COMPLETED, freshCompletedIds);
+          // Update cache (plan-specific)
+          setCachedWordIds(planCacheKeySaved, freshSavedIds);
+          setCachedWordIds(planCacheKeyCompleted, freshCompletedIds);
 
           // Update state with fresh data (may differ from cache)
           setSavedWordIds(freshSavedIds);
           setCompletedWordIds(freshCompletedIds);
 
-          // If we used cache, update word pool with fresh completed IDs
+          // If we used cache, update word pool with fresh completed IDs (plan-specific)
+          setLoadingStage('pool');
           if (useCache && !isReviewMode) {
             const freshCompletedIdsSet = new Set(freshCompletedIds);
-            const pool = getWordPool(freshCompletedIdsSet, POOL_SIZE);
+            const pool = getWordPool(
+              activePlan.sourceLanguage,
+              activePlan.targetLanguage,
+              freshCompletedIdsSet,
+              POOL_SIZE
+            );
             setWords(pool);
           } else if (!isReviewMode) {
-            // If no cache was used, set words now
+            // If no cache was used, set words now (plan-specific)
             const completedIdsSet = new Set(freshCompletedIds);
-            const pool = getWordPool(completedIdsSet, POOL_SIZE);
+            const pool = getWordPool(
+              activePlan.sourceLanguage,
+              activePlan.targetLanguage,
+              completedIdsSet,
+              POOL_SIZE
+            );
             setWords(pool);
+            setLoadingStage('done');
             setIsLoading(false);
           } else {
-            // Review mode: if no review words loaded, load normal pool as fallback
+            // Review mode: if no review words loaded, load normal pool as fallback (plan-specific)
             if (words.length === 0) {
               const completedIdsSet = new Set(freshCompletedIds);
-              const pool = getWordPool(completedIdsSet, POOL_SIZE);
+              const pool = getWordPool(
+                activePlan.sourceLanguage,
+                activePlan.targetLanguage,
+                completedIdsSet,
+                POOL_SIZE
+              );
               setWords(pool);
             }
+            setLoadingStage('done');
             setIsLoading(false);
           }
         } catch (firebaseError) {
@@ -202,9 +351,14 @@ export const FlashcardSession: React.FC = () => {
         }
       } catch (error) {
         console.error("Error fetching user words", error);
-        // Fallback: load words even if fetch fails
-        if (!isReviewMode) {
-          const pool = getWordPool(new Set(), POOL_SIZE);
+        // Fallback: load words even if fetch fails (plan-specific)
+        if (!isReviewMode && activePlan) {
+          const pool = getWordPool(
+            activePlan.sourceLanguage,
+            activePlan.targetLanguage,
+            new Set(),
+            POOL_SIZE
+          );
           setWords(pool);
           setIsLoading(false);
         } else {
@@ -214,14 +368,20 @@ export const FlashcardSession: React.FC = () => {
     };
 
     fetchUserWords();
-  }, [user, isReviewMode]);
+  }, [user, activePlan, isReviewMode]);
 
-  // Refill pool when it gets low
+  // Refill pool when it gets low (plan-specific)
   const refillPool = (currentWords: Word[], completedIds: string[]) => {
+    if (!activePlan) return currentWords;
+    
     // Convert Array to Set for getAllAvailableWords (it expects Set)
     const completedIdsSet = new Set(completedIds);
     const currentWordIds = new Set(currentWords.map(w => w.id));
-    const availableWords = getAllAvailableWords(completedIdsSet);
+    const availableWords = getAllAvailableWords(
+      activePlan.sourceLanguage,
+      activePlan.targetLanguage,
+      completedIdsSet
+    );
     
     // Get words not in current pool and not completed
     const newWords = availableWords.filter(w => !currentWordIds.has(w.id));
@@ -272,27 +432,39 @@ export const FlashcardSession: React.FC = () => {
       completedSize: completedWordIds.length
     });
     
-    // Save to Firestore in background (don't await)
-    if (isCurrentlyCompleted && user) {
-      const completedWordRef = doc(db, 'users', user.uid, 'completed_words', currentWord.id);
+    // Save to Firestore in background (don't await) - plan-specific
+    if (isCurrentlyCompleted && user && activePlan) {
+      const completedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words', currentWord.id);
       setDoc(completedWordRef, {
         wordId: currentWord.id,
-        english: currentWord.english,
-        turkish: currentWord.turkish,
+        planId: activePlan.id,
+        sourceText: currentWord.sourceText || currentWord.english || '',
+        targetText: currentWord.targetText || currentWord.turkish || '',
+        sourceLanguage: activePlan.sourceLanguage,
+        targetLanguage: activePlan.targetLanguage,
+        // Legacy fields for backward compatibility
+        english: currentWord.english || currentWord.sourceText,
+        turkish: currentWord.turkish || currentWord.targetText,
         completedAt: serverTimestamp()
       }, { merge: true }).catch(err => {
         console.error("[PAGINATE] Error saving completed word:", err);
       });
-    } else if (isCurrentlySaved && user) {
-      const savedWordRef = doc(db, 'users', user.uid, 'saved_words', currentWord.id);
+    } else if (isCurrentlySaved && user && activePlan) {
+      const savedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', currentWord.id);
       const wordData: any = {
         wordId: currentWord.id,
-        english: currentWord.english,
-        turkish: currentWord.turkish,
+        planId: activePlan.id,
+        sourceText: currentWord.sourceText || currentWord.english || '',
+        targetText: currentWord.targetText || currentWord.turkish || '',
+        sourceLanguage: activePlan.sourceLanguage,
+        targetLanguage: activePlan.targetLanguage,
         example: currentWord.example || '',
         type: currentWord.type || 'noun',
         level: currentWord.level || 1,
-        savedAt: serverTimestamp()
+        savedAt: serverTimestamp(),
+        // Legacy fields for backward compatibility
+        english: currentWord.english || currentWord.sourceText,
+        turkish: currentWord.turkish || currentWord.targetText,
       };
       if (currentWord.pronunciation) {
         wordData.pronunciation = currentWord.pronunciation;
@@ -373,12 +545,12 @@ export const FlashcardSession: React.FC = () => {
 
   const toggleSaveWord = async () => {
     console.log("[TOGGLE SAVE] ===== FUNCTION CALLED =====");
-    console.log("[TOGGLE SAVE] Pre-check:", { user: !!user, currentWord: !!currentWord, isSaving, isCompleting });
+    console.log("[TOGGLE SAVE] Pre-check:", { user: !!user, currentWord: !!currentWord, activePlan: !!activePlan, isSaving, isCompleting });
     console.log("[TOGGLE SAVE] savedWordIds state:", savedWordIds);
     console.log("[TOGGLE SAVE] completedWordIds state:", completedWordIds);
     
-    if (!user || !currentWord || isSaving || isCompleting) {
-      console.log("[TOGGLE SAVE] Blocked:", { user: !!user, currentWord: !!currentWord, isSaving, isCompleting });
+    if (!user || !currentWord || !activePlan || isSaving || isCompleting) {
+      console.log("[TOGGLE SAVE] Blocked:", { user: !!user, currentWord: !!currentWord, activePlan: !!activePlan, isSaving, isCompleting });
       return;
     }
     
@@ -388,8 +560,9 @@ export const FlashcardSession: React.FC = () => {
     const isCurrentlySaved = savedWordIds.includes(word.id);
     console.log("[TOGGLE SAVE] Start:", { wordId: word.id, isCurrentlySaved, savedSize: savedWordIds.length, completedSize: completedWordIds.length });
     
-    const wordRef = doc(db, 'users', user.uid, 'saved_words', word.id);
-    const completedWordRef = doc(db, 'users', user.uid, 'completed_words', word.id);
+    // Plan-specific collection paths
+    const wordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', word.id);
+    const completedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words', word.id);
     
     console.log("[TOGGLE SAVE] About to set isSaving to true");
     setIsSaving(true);
@@ -422,6 +595,10 @@ export const FlashcardSession: React.FC = () => {
           console.log("[TOGGLE SAVE] ===== END State update (REMOVE) =====");
           return newArray;
         });
+
+        // CRITICAL: Also remove from Dashboard cache (sync immediately)
+        removeWordFromDashboardCache(activePlan.id, word.id);
+
         // Reset loading immediately after state update (optimistic UI)
         resetLoading();
         
@@ -462,20 +639,20 @@ export const FlashcardSession: React.FC = () => {
           console.log("[TOGGLE SAVE] prev array type:", typeof prev, Array.isArray(prev));
           console.log("[TOGGLE SAVE] prev array length:", prev?.length);
           console.log("[TOGGLE SAVE] word.id to add:", word.id);
-          
+
           if (!Array.isArray(prev)) {
             console.error("[TOGGLE SAVE] ERROR: prev is not an array!", prev);
             return [word.id]; // Fallback
           }
-          
+
           const alreadyIncluded = prev.includes(word.id);
           console.log("[TOGGLE SAVE] Word already in saved?", alreadyIncluded);
-          
+
           if (alreadyIncluded) {
             console.log("[TOGGLE SAVE] Word already in saved - returning same array");
             return prev;
           }
-          
+
           const newArray = [...prev, word.id];
           console.log("[TOGGLE SAVE] ===== State updated - added (optimistic) =====");
           console.log("[TOGGLE SAVE] prevSize:", prev.length, "newSize:", newArray.length);
@@ -484,7 +661,10 @@ export const FlashcardSession: React.FC = () => {
           console.log("[TOGGLE SAVE] ===== END State update =====");
           return newArray;
         });
-        
+
+        // CRITICAL: Also add to Dashboard cache (sync immediately with full word data)
+        addWordToDashboardCache(activePlan.id, word, activePlan);
+
         console.log("[TOGGLE SAVE] setSavedWordIds called, should trigger re-render");
         
         // If word is completed, remove it from completed first (mutual exclusivity)
@@ -501,15 +681,21 @@ export const FlashcardSession: React.FC = () => {
           });
         }
         
-        // Add to saved - only include defined fields
+        // Add to saved - plan-specific with new structure
         const wordData: any = {
           wordId: word.id,
-          english: word.english,
-          turkish: word.turkish,
+          planId: activePlan.id,
+          sourceText: word.sourceText || word.english || '',
+          targetText: word.targetText || word.turkish || '',
+          sourceLanguage: activePlan.sourceLanguage,
+          targetLanguage: activePlan.targetLanguage,
           example: word.example || '',
           type: word.type || 'noun',
           level: word.level || 1,
-          savedAt: serverTimestamp()
+          savedAt: serverTimestamp(),
+          // Legacy fields for backward compatibility
+          english: word.english || word.sourceText,
+          turkish: word.turkish || word.targetText,
         };
         
         // Only add pronunciation if it's defined
@@ -547,8 +733,8 @@ export const FlashcardSession: React.FC = () => {
   };
 
   const toggleCompleteWord = async () => {
-    if (!user || !currentWord || words.length === 0 || isSaving || isCompleting) {
-      console.log("[TOGGLE COMPLETE] Blocked:", { user: !!user, currentWord: !!currentWord, wordsLength: words.length, isSaving, isCompleting });
+    if (!user || !currentWord || !activePlan || words.length === 0 || isSaving || isCompleting) {
+      console.log("[TOGGLE COMPLETE] Blocked:", { user: !!user, currentWord: !!currentWord, activePlan: !!activePlan, wordsLength: words.length, isSaving, isCompleting });
       return;
     }
     
@@ -556,8 +742,9 @@ export const FlashcardSession: React.FC = () => {
     const isCurrentlyCompleted = completedWordIds.includes(word.id);
     console.log("[TOGGLE COMPLETE] Start:", { wordId: word.id, isCurrentlyCompleted, savedSize: savedWordIds.length, completedSize: completedWordIds.length });
     
-    const wordRef = doc(db, 'users', user.uid, 'completed_words', word.id);
-    const savedWordRef = doc(db, 'users', user.uid, 'saved_words', word.id);
+    // Plan-specific collection paths
+    const wordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words', word.id);
+    const savedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', word.id);
     
     setIsCompleting(true);
     
@@ -648,18 +835,26 @@ export const FlashcardSession: React.FC = () => {
             console.log("[TOGGLE COMPLETE] Saved state updated - removed:", { newSize: newArray.length, prevSize: prev.length });
             return newArray;
           });
+          // CRITICAL: Also remove from Dashboard cache (sync immediately)
+          removeWordFromDashboardCache(activePlan.id, word.id);
           // Firestore delete (async, don't await - fire and forget)
           deleteDoc(savedWordRef).catch(err => {
             console.error("[TOGGLE COMPLETE] Failed to delete from saved in Firestore:", err);
           });
         }
         
-        // Mark as completed
+        // Mark as completed - plan-specific with new structure
         const completedData = {
           wordId: word.id,
-          english: word.english,
-          turkish: word.turkish,
-          completedAt: serverTimestamp()
+          planId: activePlan.id,
+          sourceText: word.sourceText || word.english || '',
+          targetText: word.targetText || word.turkish || '',
+          sourceLanguage: activePlan.sourceLanguage,
+          targetLanguage: activePlan.targetLanguage,
+          completedAt: serverTimestamp(),
+          // Legacy fields for backward compatibility
+          english: word.english || word.sourceText,
+          turkish: word.turkish || word.targetText,
         };
         // Reset loading immediately after state update (optimistic UI)
         resetLoading();
@@ -757,7 +952,25 @@ export const FlashcardSession: React.FC = () => {
   // Calculate counter values
   const savedCount = savedWordIds.length;
   const completedCount = completedWordIds.length;
-  
+
+  // CRITICAL: Sync state changes to localStorage cache
+  // This ensures progress is persisted even when navigating away
+  useEffect(() => {
+    if (activePlan && savedWordIds.length >= 0) {
+      const cacheKey = `${CACHE_KEY_SAVED}_${activePlan.id}`;
+      setCachedWordIds(cacheKey, savedWordIds);
+      console.log("[CACHE SYNC] Saved words cached:", savedWordIds.length);
+    }
+  }, [savedWordIds, activePlan?.id]);
+
+  useEffect(() => {
+    if (activePlan && completedWordIds.length >= 0) {
+      const cacheKey = `${CACHE_KEY_COMPLETED}_${activePlan.id}`;
+      setCachedWordIds(cacheKey, completedWordIds);
+      console.log("[CACHE SYNC] Completed words cached:", completedWordIds.length);
+    }
+  }, [completedWordIds, activePlan?.id]);
+
   // Debug logging - log whenever currentWord or state changes
   useEffect(() => {
     if (currentWord) {
@@ -819,237 +1032,105 @@ export const FlashcardSession: React.FC = () => {
         </div>
       );
     }
+
+    // No words available for this language pair
+    if (!isLoading && words.length === 0 && completedWordIds.length === 0 && !isReviewMode) {
+      const sourceLang = activePlan ? getLanguageByCode(activePlan.sourceLanguage) : null;
+      const targetLang = activePlan ? getLanguageByCode(activePlan.targetLanguage) : null;
+
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center px-4">
+          <Background />
+          <Navbar />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center max-w-md"
+          >
+            <Database className="w-16 h-16 text-yellow-400 mx-auto mb-4" />
+            <h2 className="text-3xl font-bold text-white mb-4">No Words Available</h2>
+            {activePlan && sourceLang && targetLang ? (
+              <div className="mb-6">
+                <div className="flex items-center justify-center gap-3 mb-3">
+                  <span className="text-3xl">{sourceLang.flag}</span>
+                  <span className="text-slate-500">→</span>
+                  <span className="text-3xl">{targetLang.flag}</span>
+                </div>
+                <p className="text-slate-400">
+                  Currently, only <span className="text-neon-cyan">English → Turkish</span> vocabulary is available.
+                </p>
+                <p className="text-slate-500 text-sm mt-2">
+                  Create a new plan with English → Turkish to start learning.
+                </p>
+              </div>
+            ) : (
+              <p className="text-slate-400 mb-6">Please select a learning plan first.</p>
+            )}
+            <Link to="/plans">
+              <GlassButton>
+                {activePlan ? 'Change Plan' : 'Select Plan'}
+              </GlassButton>
+            </Link>
+          </motion.div>
+        </div>
+      );
+    }
     
-    // Card states: We always show 2 cards
-    // - Center card (always visible)
-    // - Leaving/Entering card (alternates)
-    const getCardState = (cardId: number) => {
-      if (cardId === 0) {
-        // Center card - always visible
-        return 'center';
-      }
-      
-      if (cardId === 1) {
-        // Even cycles: card is leaving (alternate correct/incorrect)
-        // Odd cycles: new card is entering
-        const isLeaving = cardCycle % 2 === 0;
-        if (isLeaving) {
-          // Alternate correct/incorrect every 2 cycles
-          const correctCycle = Math.floor(cardCycle / 2) % 2 === 0;
-          return correctCycle ? 'correct' : 'incorrect';
-        } else {
-          return 'entering';
-        }
-      }
-      
-      return 'hidden';
-    };
-    
+    // GENTLE LOADING - Single breathing card, minimal and calm
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
         <Background />
         <Navbar />
-        <motion.div 
-          className="text-center max-w-4xl px-4"
+        <motion.div
+          className="text-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
         >
-          {/* Cyberpunk Card Flow Animation */}
-          <div 
-            className="relative w-full h-96 mb-8 flex items-center justify-center overflow-hidden"
-            style={{ perspective: '1200px' }}
-          >
-            {/* Center card - always visible */}
-            {[...Array(3)].map((_, i) => {
-              const state = getCardState(i);
-              const isCenter = state === 'center';
-              const isCorrect = state === 'correct';
-              const isIncorrect = state === 'incorrect';
-              const isEntering = state === 'entering';
-              
-              if (state === 'hidden') return null;
-              
-              return (
-                <motion.div
-                  key={i}
-                  className="absolute"
-                  style={{
-                    transformStyle: 'preserve-3d',
-                    transformOrigin: 'center center',
-                  }}
-                  initial={isEntering ? {
-                    x: 0,
-                    y: 200,
-                    scale: 0.5,
-                    opacity: 0,
-                    rotateY: 0,
-                    rotateX: 90,
-                  } : {}}
-                  animate={isCenter ? {
-                    x: 0,
-                    y: 0,
-                    scale: 1,
-                    opacity: 1,
-                    rotateY: 0,
-                    rotateX: 0,
-                    z: 0,
-                  } : isCorrect ? {
-                    x: 400,
-                    y: -50,
-                    scale: 0.6,
-                    opacity: [1, 0.8, 0],
-                    rotateY: 45,
-                    rotateX: -15,
-                    z: -100,
-                  } : isIncorrect ? {
-                    x: -400,
-                    y: -50,
-                    scale: 0.6,
-                    opacity: [1, 0.8, 0],
-                    rotateY: -45,
-                    rotateX: -15,
-                    z: -100,
-                  } : isEntering ? {
-                    x: 0,
-                    y: 0,
-                    scale: [0.5, 1],
-                    opacity: [0, 1],
-                    rotateY: 0,
-                    rotateX: [90, 0],
-                    z: 0,
-                  } : {}}
-                  transition={{
-                    duration: 0.8,
-                    type: "spring",
-                    stiffness: 150,
-                    damping: 25,
-                  }}
-                >
-                  {/* Card */}
-                  <div
-                    className="w-32 h-44 md:w-40 md:h-56 rounded-2xl border-2 relative overflow-hidden backdrop-blur-xl"
-                    style={{
-                      background: isCorrect
-                        ? 'linear-gradient(135deg, rgba(34, 197, 94, 0.4) 0%, rgba(22, 163, 74, 0.5) 100%)'
-                        : isIncorrect
-                          ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.4) 0%, rgba(220, 38, 38, 0.5) 100%)'
-                          : 'linear-gradient(135deg, rgba(0, 243, 255, 0.3) 0%, rgba(0, 243, 255, 0.4) 100%)',
-                      borderColor: isCorrect
-                        ? 'rgba(34, 197, 94, 0.8)'
-                        : isIncorrect
-                          ? 'rgba(239, 68, 68, 0.8)'
-                          : 'rgba(0, 243, 255, 0.6)',
-                      boxShadow: isCorrect
-                        ? '0 20px 60px rgba(34, 197, 94, 0.6), 0 0 40px rgba(34, 197, 94, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2)'
-                        : isIncorrect
-                          ? '0 20px 60px rgba(239, 68, 68, 0.6), 0 0 40px rgba(239, 68, 68, 0.4), inset 0 2px 0 rgba(255, 255, 255, 0.2)'
-                          : '0 20px 60px rgba(0, 243, 255, 0.4), 0 0 40px rgba(0, 243, 255, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.15)',
-                    }}
-                  >
-                    {/* Holographic shimmer effect */}
-                    <motion.div
-                      className="absolute inset-0 rounded-2xl"
-                      style={{
-                        background: 'linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.1) 50%, transparent 100%)',
-                      }}
-                      animate={{
-                        x: ['-100%', '200%'],
-                      }}
-                      transition={{
-                        duration: 3,
-                        repeat: Infinity,
-                        ease: "linear",
-                      }}
-                    />
-                    
-                    {/* Card content */}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-10">
-                      {isCorrect ? (
-                        <CheckCircle className="w-10 h-10 md:w-12 md:h-12 text-green-400" />
-                      ) : isIncorrect ? (
-                        <motion.div
-                          animate={{ rotate: [0, 10, -10, 0] }}
-                          transition={{ duration: 0.5, repeat: Infinity }}
-                        >
-                          <X className="w-10 h-10 md:w-12 md:h-12 text-red-400" strokeWidth={3} />
-                        </motion.div>
-                      ) : (
-                        <div className="w-8 h-8 md:w-10 md:h-10 rounded-lg border-2 border-neon-cyan/60 bg-neon-cyan/10" />
-                      )}
-                    </div>
-                    
-                    {/* Glow pulse effect */}
-                    {(isCorrect || isIncorrect) && (
-                      <motion.div
-                        className="absolute inset-0 rounded-2xl"
-                        style={{
-                          background: isCorrect
-                            ? 'radial-gradient(circle, rgba(34, 197, 94, 0.5) 0%, transparent 70%)'
-                            : 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 0%, transparent 70%)',
-                        }}
-                        animate={{
-                          opacity: [0.5, 1, 0.5],
-                          scale: [1, 1.3, 1],
-                        }}
-                        transition={{
-                          duration: 0.8,
-                          repeat: Infinity,
-                          ease: "easeInOut"
-                        }}
-                      />
-                    )}
-                    
-                    {/* Particle trail for correct/incorrect */}
-                    {(isCorrect || isIncorrect) && (
-                      <>
-                        {[...Array(8)].map((_, j) => (
-                          <motion.div
-                            key={j}
-                            className="absolute w-1.5 h-1.5 rounded-full"
-                            style={{
-                              background: isCorrect ? 'rgba(34, 197, 94, 0.8)' : 'rgba(239, 68, 68, 0.8)',
-                              left: '50%',
-                              top: '50%',
-                            }}
-                            animate={{
-                              x: isCorrect 
-                                ? [0, Math.cos(j * 45 * Math.PI / 180) * 60]
-                                : [0, Math.cos(j * 45 * Math.PI / 180) * -60],
-                              y: [0, Math.sin(j * 45 * Math.PI / 180) * 60],
-                              opacity: [1, 0],
-                              scale: [1, 0],
-                            }}
-                            transition={{
-                              duration: 0.8,
-                              delay: j * 0.05,
-                              ease: "easeOut"
-                            }}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-          
-          {/* Status text */}
+          {/* Single Breathing Card */}
           <motion.div
-            className="text-2xl md:text-3xl font-bold mb-2 text-neon-cyan"
-            animate={{ opacity: [0.7, 1, 0.7] }}
+            className="w-72 h-96 mx-auto mb-8 rounded-3xl border backdrop-blur-xl flex items-center justify-center"
+            style={{
+              background: 'linear-gradient(135deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%)',
+              borderColor: 'rgba(0, 243, 255, 0.2)',
+              boxShadow: '0 20px 50px rgba(0, 0, 0, 0.3), 0 0 30px rgba(0, 243, 255, 0.1)',
+            }}
+            animate={{
+              scale: [1, 1.015, 1],
+              borderColor: ['rgba(0, 243, 255, 0.2)', 'rgba(0, 243, 255, 0.35)', 'rgba(0, 243, 255, 0.2)'],
+            }}
+            transition={{
+              duration: 3,
+              repeat: Infinity,
+              ease: "easeInOut",
+            }}
+          >
+            {/* Subtle inner glow */}
+            <motion.div
+              className="w-16 h-16 rounded-full"
+              style={{
+                background: 'radial-gradient(circle, rgba(0, 243, 255, 0.15) 0%, transparent 70%)',
+              }}
+              animate={{
+                scale: [1, 1.2, 1],
+                opacity: [0.5, 0.8, 0.5],
+              }}
+              transition={{
+                duration: 3,
+                repeat: Infinity,
+                ease: "easeInOut",
+              }}
+            />
+          </motion.div>
+
+          {/* Simple text */}
+          <motion.p
+            className="text-slate-400 text-sm"
+            animate={{ opacity: [0.5, 0.8, 0.5] }}
             transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
           >
-            Preparing your learning deck...
-          </motion.div>
-          
-          <motion.div
-            className="text-slate-400 text-sm md:text-base"
-            animate={{ opacity: [0.5, 0.8, 0.5] }}
-            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
-          >
-            {isLoading ? 'Loading words...' : 'Initializing word pool...'}
-          </motion.div>
+            Preparing your cards...
+          </motion.p>
         </motion.div>
       </div>
     );
@@ -1060,35 +1141,24 @@ export const FlashcardSession: React.FC = () => {
       <Background />
       <Navbar />
 
-      <main className="flex-1 flex flex-col items-center justify-center px-4 pt-20 relative">
-        <div className="absolute top-24 left-0 w-full flex justify-center z-10 gap-3">
-            <motion.div 
-              className="bg-gradient-to-r from-slate-800/90 via-slate-900/90 to-slate-800/90 backdrop-blur-xl px-5 py-2.5 rounded-full border-2 border-neon-cyan/40 text-sm font-bold"
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              key={`learned-${completedCount}-${completedWordIdsKey}`}
-              style={{
-                boxShadow: '0 4px 20px rgba(0, 243, 255, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
-              }}
-            >
-              <span className="text-neon-cyan">Learned: {completedCount}</span>
-            </motion.div>
-            
-            <Link to="/dashboard">
-              <motion.div 
-                className="bg-gradient-to-r from-slate-800/90 via-slate-900/90 to-slate-800/90 backdrop-blur-xl px-5 py-2.5 rounded-full border-2 border-neon-pink/40 text-sm font-bold cursor-pointer hover:border-neon-pink/70 transition-all"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                key={`saved-${savedCount}-${savedWordIdsKey}`}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                style={{
-                  boxShadow: '0 4px 20px rgba(255, 0, 85, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
-                }}
-              >
-                <span className="text-neon-pink">Saved: {savedCount}</span>
-              </motion.div>
+      <main className="flex-1 flex flex-col items-center justify-center px-4 pt-20 pb-32 relative">
+        {/* Minimal Progress Bar */}
+        <div className="absolute top-24 left-0 w-full flex justify-center z-10">
+          <motion.div
+            className="flex items-center gap-6 px-6 py-3 rounded-2xl bg-slate-900/60 backdrop-blur-xl border border-white/5"
+            initial={{ y: -20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-neon-cyan" />
+              <span className="text-sm text-slate-300 font-medium">{completedCount} learned</span>
+            </div>
+            <div className="w-px h-4 bg-white/10" />
+            <Link to="/dashboard" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+              <div className="w-2 h-2 rounded-full bg-neon-pink" />
+              <span className="text-sm text-slate-300 font-medium">{savedCount} saved</span>
             </Link>
+          </motion.div>
         </div>
 
         <div 
@@ -1100,36 +1170,32 @@ export const FlashcardSession: React.FC = () => {
               key={currentIndex}
               custom={direction}
               variants={{
+                // GENTLE TRANSITIONS - softer, shorter, no rotation or blur
                 enter: (direction: number) => ({
-                  x: direction > 0 ? 1000 : -1000,
+                  x: direction > 0 ? 200 : -200,
                   opacity: 0,
-                  scale: 0.8,
-                  rotateY: direction > 0 ? 45 : -45,
-                  filter: 'blur(10px)'
+                  scale: 0.96,
                 }),
                 center: {
                   zIndex: 10,
                   x: 0,
                   opacity: 1,
                   scale: 1,
-                  rotateY: 0,
-                  filter: 'blur(0px)'
                 },
                 exit: (direction: number) => ({
                   zIndex: 0,
-                  x: direction < 0 ? 1000 : -1000,
+                  x: direction < 0 ? 200 : -200,
                   opacity: 0,
-                  scale: 0.8,
-                  rotateY: direction < 0 ? 45 : -45,
-                  filter: 'blur(10px)'
+                  scale: 0.96,
                 })
               }}
               initial="enter"
               animate="center"
               exit="exit"
               transition={{
-                x: { type: "spring", stiffness: 300, damping: 30 },
-                opacity: { duration: 0.2 }
+                x: { type: "spring", stiffness: 200, damping: 25 },
+                opacity: { duration: 0.25, ease: "easeOut" },
+                scale: { duration: 0.25, ease: "easeOut" }
               }}
               className="absolute w-full flex justify-center"
               style={{ position: 'absolute', zIndex: 10, pointerEvents: 'auto' }}
@@ -1146,233 +1212,95 @@ export const FlashcardSession: React.FC = () => {
           </AnimatePresence>
         </div>
 
-        {/* Controls - Check button is primary, larger and more prominent */}
-        <div className="flex flex-col items-center gap-4 mt-12 w-full px-4 relative z-30" style={{ position: 'relative', zIndex: 30 }}>
-          <div className="flex items-center justify-center gap-3 sm:gap-4 w-full max-w-md relative z-30" style={{ position: 'relative', zIndex: 30 }}>
-            {/* Prev Button - Smaller, less prominent */}
-            <motion.button 
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log("[BUTTON] Prev clicked - BEFORE paginate call", { 
-                  wordsLength: words.length, 
-                  currentIndex, 
-                  disabled: words.length === 0 
-                });
-                if (words.length === 0) {
-                  console.log("[BUTTON] Prev blocked: words.length is 0");
-                  return;
-                }
-                console.log("[BUTTON] Prev calling paginate(-1)");
-                paginate(-1);
-                console.log("[BUTTON] Prev paginate call completed");
-              }}
-              disabled={words.length === 0}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="flex-shrink-0 p-2.5 sm:p-3 rounded-xl relative overflow-hidden transition-all duration-300 group bg-slate-800/40 border border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/10 hover:border-neon-cyan/60 disabled:opacity-50 disabled:cursor-not-allowed z-20"
-              style={{ position: 'relative', zIndex: 20 }}
-            >
-              <ArrowLeft size={18} className="sm:w-5 sm:h-5 relative z-10" />
-            </motion.button>
+        {/* Floating Control Bar - Fixed at bottom, centered */}
+        <motion.div
+          className="fixed bottom-8 left-0 right-0 z-50 flex justify-center px-4"
+          initial={{ y: 100, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.3, type: "spring", stiffness: 200, damping: 20 }}
+        >
+          <div className="flex flex-col items-center">
+            <div className="flex items-center p-1.5 rounded-2xl bg-slate-900/90 backdrop-blur-2xl border border-white/10 shadow-2xl shadow-black/50">
+              {/* Skip/Previous */}
+              <motion.button
+                onClick={() => words.length > 0 && paginate(-1)}
+                disabled={words.length === 0}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="w-16 flex flex-col items-center gap-1 py-2.5 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-all disabled:opacity-30"
+              >
+                <ArrowLeft size={18} />
+                <span className="text-[9px] font-medium uppercase tracking-wider">Skip</span>
+              </motion.button>
 
-            {/* Save Button - Secondary action, medium size */}
-            <motion.button
-              onClick={() => {
-                console.log("[BUTTON] Save clicked, current state:", { isSaved, isSaving, isCompleting, currentWordId: currentWord?.id });
-                toggleSaveWord();
-              }}
-              disabled={isSaving || isCompleting || !currentWord}
-              whileTap={{ scale: 0.95 }}
-              key={`save-${currentWord?.id}-${isSaved}-${savedWordIdsKey}`}
-              animate={isSaved && !isSaving ? {
-                scale: [1, 1.15, 1],
-              } : {}}
-              transition={{
-                scale: { duration: 0.4, type: "spring", stiffness: 300, damping: 15 }
-              }}
-              className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
-                isSaved
-                  ? 'bg-neon-pink/20 border-neon-pink/70 text-neon-pink shadow-[0_0_20px_rgba(255,0,85,0.4)]'
-                  : isSaving
-                    ? 'bg-green-500/20 border-green-500/70 text-green-400 shadow-[0_0_20px_rgba(34,197,94,0.4)]'
-                    : 'bg-slate-800/50 border-neon-pink/50 text-neon-pink hover:bg-neon-pink/10 hover:border-neon-pink/80 hover:shadow-[0_0_20px_rgba(255,0,85,0.4)]'
-              }`}
-            >
-              {/* Pink glow pulse when saved */}
-              {isSaved && !isSaving && (
+              {/* Save for Later */}
+              <motion.button
+                onClick={() => toggleSaveWord()}
+                disabled={isSaving || isCompleting || !currentWord}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={`w-16 flex flex-col items-center gap-1 py-2.5 rounded-xl transition-all ${
+                  isSaved
+                    ? 'text-neon-pink bg-neon-pink/10'
+                    : 'text-slate-500 hover:text-neon-pink hover:bg-neon-pink/5'
+                }`}
+              >
                 <motion.div
-                  className="absolute inset-0 rounded-2xl"
-                  style={{
-                    background: 'radial-gradient(circle, rgba(255, 0, 85, 0.3) 0%, transparent 70%)',
-                  }}
-                  animate={{
-                    opacity: [0.3, 0.6, 0.3],
-                    scale: [1, 1.2, 1],
-                  }}
-                  transition={{
-                    duration: 1.5,
-                    repeat: Infinity,
-                    ease: "easeInOut"
-                  }}
-                />
-              )}
-              <AnimatePresence mode="wait">
-                {isSaving ? (
-                  <motion.div
-                    key="saving"
-                    initial={{ scale: 0, rotate: -180 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    exit={{ scale: 0, rotate: 180 }}
-                    transition={{ duration: 0.3, type: "spring" }}
-                    className="relative z-10"
-                  >
-                    <CheckCircle2 size={22} className="sm:w-6 sm:h-6" />
-                  </motion.div>
-                ) : isSaved ? (
-                  <motion.div
-                    key="saved"
-                    initial={{ scale: 0, rotate: -90 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    exit={{ scale: 0, rotate: 90 }}
-                    transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
-                    className="relative z-10"
-                  >
-                    <BookmarkCheck size={22} className="sm:w-6 sm:h-6" />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="unsaved"
-                    initial={{ scale: 1 }}
-                    animate={{ scale: 1 }}
-                    className="relative z-10"
-                  >
-                    <Bookmark size={22} className="sm:w-6 sm:h-6" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.button>
+                  animate={isSaved ? { scale: [1, 1.2, 1] } : {}}
+                  transition={{ duration: 0.3 }}
+                >
+                  {isSaved ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+                </motion.div>
+                <span className="text-[9px] font-medium uppercase tracking-wider">Save</span>
+              </motion.button>
 
-            {/* Complete Button - PRIMARY ACTION - Green tones with celebration effect */}
-            <motion.button
-              onClick={() => {
-                console.log("[BUTTON] Complete clicked, current state:", { isCompleted, isSaving, isCompleting, currentWordId: currentWord?.id });
-                toggleCompleteWord();
-              }}
-              disabled={isSaving || isCompleting || !currentWord}
-              key={`complete-${currentWord?.id}-${isCompleted}-${completedWordIdsKey}`}
-              whileTap={{ scale: 0.95 }}
-              animate={isCompleting ? {
-                scale: [1, 1.2, 1],
-                rotate: [0, 360]
-              } : isCompleted ? {
-                scale: [1, 1.1, 1],
-              } : {}}
-              transition={{ 
-                animate: { duration: 0.5, type: "spring", stiffness: 300, damping: 15 },
-                scale: { duration: 0.4, type: "spring", stiffness: 300, damping: 15 }
-              }}
-              className={`flex-shrink-0 relative p-3.5 sm:p-4 rounded-2xl transition-all duration-300 overflow-hidden group border-2 ${
-                isCompleted || isCompleting
-                  ? 'bg-green-500/30 border-green-500/80 text-green-300 shadow-[0_0_30px_rgba(34,197,94,0.6)]'
-                  : 'bg-gradient-to-br from-green-500/20 via-green-600/30 to-green-700/40 border-green-500/60 text-green-400 shadow-[0_4px_20px_rgba(34,197,94,0.3)] hover:bg-green-500/10 hover:border-green-500/80 hover:shadow-[0_0_20px_rgba(34,197,94,0.4)]'
-              }`}
-              style={isCompleted || isCompleting ? {} : {
-                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.3) 50%, rgba(21, 128, 61, 0.4) 100%)',
-              }}
-            >
-              {/* Celebration particles effect when completing */}
-              {isCompleting && (
-                <>
-                  {[...Array(6)].map((_, i) => (
-                    <motion.div
-                      key={i}
-                      className="absolute w-2 h-2 bg-green-400 rounded-full"
-                      initial={{ 
-                        x: 0, 
-                        y: 0, 
-                        opacity: 1,
-                        scale: 0
-                      }}
-                      animate={{
-                        x: [0, Math.cos(i * 60 * Math.PI / 180) * 40],
-                        y: [0, Math.sin(i * 60 * Math.PI / 180) * 40],
-                        opacity: [1, 0],
-                        scale: [0, 1, 0]
-                      }}
-                      transition={{
-                        duration: 0.8,
-                        delay: i * 0.1,
-                        ease: "easeOut"
-                      }}
-                    />
-                  ))}
-                </>
-              )}
-              <AnimatePresence mode="wait">
-                {isCompleting ? (
-                  <motion.div
-                    key="completing"
-                    initial={{ scale: 0, rotate: -180 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    exit={{ scale: 0, rotate: 180 }}
-                    transition={{ duration: 0.3, type: "spring" }}
-                    className="relative z-10"
-                  >
-                    <CheckCircle2 size={22} className="sm:w-6 sm:h-6" />
-                  </motion.div>
-                ) : isCompleted ? (
-                  <motion.div
-                    key="completed"
-                    initial={{ scale: 0, rotate: -90 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    exit={{ scale: 0, rotate: 90 }}
-                    transition={{ duration: 0.4, type: "spring", stiffness: 300 }}
-                    className="relative z-10"
-                  >
-                    <CheckCircle size={22} className="sm:w-6 sm:h-6" />
-                  </motion.div>
-                ) : (
-                  <motion.div
-                    key="incomplete"
-                    initial={{ scale: 1 }}
-                    animate={{ scale: 1 }}
-                    className="relative z-10"
-                  >
-                    <CheckCircle size={22} className="sm:w-6 sm:h-6" />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.button>
+              {/* Know It - Primary Action */}
+              <motion.button
+                onClick={() => {
+                  toggleCompleteWord();
+                  if (!isCompleted) {
+                    setTimeout(() => words.length > 0 && paginate(1), 300);
+                  }
+                }}
+                disabled={isSaving || isCompleting || !currentWord}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className={`w-20 flex flex-col items-center gap-1 py-2.5 mx-1 rounded-xl transition-all ${
+                  isCompleted
+                    ? 'text-green-400 bg-green-500/15'
+                    : 'text-white bg-white/10 hover:bg-green-500/10 hover:text-green-400'
+                }`}
+              >
+                <motion.div
+                  animate={isCompleted ? { scale: [1, 1.2, 1] } : {}}
+                  transition={{ duration: 0.3 }}
+                >
+                  <CheckCircle size={20} strokeWidth={isCompleted ? 2.5 : 1.5} />
+                </motion.div>
+                <span className="text-[9px] font-medium uppercase tracking-wider">
+                  {isCompleted ? 'Known' : 'Know it'}
+                </span>
+              </motion.button>
 
-            {/* Next Button - Smaller, less prominent */}
-            <motion.button 
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log("[BUTTON] Next clicked - BEFORE paginate call", { 
-                  wordsLength: words.length, 
-                  currentIndex, 
-                  disabled: words.length === 0 
-                });
-                if (words.length === 0) {
-                  console.log("[BUTTON] Next blocked: words.length is 0");
-                  return;
-                }
-                console.log("[BUTTON] Next calling paginate(1)");
-                paginate(1);
-                console.log("[BUTTON] Next paginate call completed");
-              }}
-              disabled={words.length === 0}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="flex-shrink-0 p-2.5 sm:p-3 rounded-xl relative overflow-hidden transition-all duration-300 group bg-slate-800/40 border border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/10 hover:border-neon-cyan/60 disabled:opacity-50 disabled:cursor-not-allowed z-20"
-              style={{ position: 'relative', zIndex: 20 }}
-            >
-              <ArrowRight size={18} className="sm:w-5 sm:h-5 relative z-10" />
-            </motion.button>
+              {/* Next */}
+              <motion.button
+                onClick={() => words.length > 0 && paginate(1)}
+                disabled={words.length === 0}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="w-16 flex flex-col items-center gap-1 py-2.5 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-all disabled:opacity-30"
+              >
+                <ArrowRight size={18} />
+                <span className="text-[9px] font-medium uppercase tracking-wider">Next</span>
+              </motion.button>
+            </div>
+
+            {/* Progress indicator */}
+            <div className="mt-2.5 text-[11px] text-slate-600">
+              {currentIndex + 1} / {words.length}
+            </div>
           </div>
-        </div>
+        </motion.div>
       </main>
     </div>
   );
