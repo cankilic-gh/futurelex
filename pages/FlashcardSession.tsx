@@ -489,8 +489,10 @@ export const FlashcardSession: React.FC = () => {
       setCurrentIndex(adjustedIndex);
 
       // Refill pool if needed (sync, no setTimeout)
+      // Include current word in completed list to ensure it's not re-added
       if (!isReviewMode && filteredWords.length < 50) {
-        const refilledWords = refillPool(filteredWords, completedWordIds);
+        const allCompletedIds = [...completedWordIds, currentWord.id];
+        const refilledWords = refillPool(filteredWords, allCompletedIds);
         if (refilledWords.length > filteredWords.length) {
           setWords(refilledWords);
         }
