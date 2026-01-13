@@ -225,7 +225,7 @@ export const PlanManager: React.FC = () => {
                 className="bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-md w-full relative"
               >
                 {/* Header */}
-                <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-white">New Plan</h2>
                   <button
                     onClick={() => setShowCreateModal(false)}
@@ -236,7 +236,7 @@ export const PlanManager: React.FC = () => {
                 </div>
 
                 {/* Source Language */}
-                <div className="mb-5">
+                <div className="mb-4">
                   <LanguageSelector
                     label="I know"
                     selectedLanguage={sourceLanguage}
@@ -246,7 +246,7 @@ export const PlanManager: React.FC = () => {
                 </div>
 
                 {/* Target Language */}
-                <div className="mb-5">
+                <div className="mb-4">
                   <LanguageSelector
                     label="I want to learn"
                     selectedLanguage={targetLanguage}
@@ -257,8 +257,8 @@ export const PlanManager: React.FC = () => {
                 </div>
 
                 {/* Custom Name (Optional) */}
-                <div className="mb-5">
-                  <label className="block text-xs font-medium text-slate-500 mb-1.5">
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
                     Name (optional)
                   </label>
                   <input

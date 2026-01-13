@@ -33,7 +33,7 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
   return (
     <div className="w-full">
       {label && (
-        <label className="block text-sm font-medium text-slate-300 mb-3">
+        <label className="block text-xs font-medium text-slate-400 mb-2">
           {label}
         </label>
       )}
@@ -49,37 +49,29 @@ export const LanguageSelector: React.FC<LanguageSelectorProps> = ({
         />
       )}
 
-      {/* Language Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 max-h-64 overflow-y-auto">
+      {/* Language Grid - Compact */}
+      <div className="grid grid-cols-3 gap-2">
         {availableLanguages.map((language) => {
           const isSelected = selectedLanguage === language.code;
-          
+
           return (
             <motion.button
               key={language.code}
               onClick={() => onSelect(language.code)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
               className={`
-                p-4 rounded-xl border-2 transition-all
+                p-2.5 rounded-xl border transition-all text-center
                 ${isSelected
-                  ? 'bg-neon-cyan/20 border-neon-cyan shadow-[0_0_20px_rgba(0,243,255,0.3)]'
+                  ? 'bg-neon-cyan/15 border-neon-cyan/50'
                   : 'bg-white/5 border-white/10 hover:border-white/20 hover:bg-white/10'
                 }
               `}
             >
-              <div className="text-3xl mb-2">{language.flag}</div>
-              <div className="text-sm font-semibold text-white">
+              <div className="text-xl mb-1">{language.flag}</div>
+              <div className="text-xs font-medium text-white truncate">
                 {language.nativeName}
               </div>
-              <div className="text-xs text-slate-400">
-                {language.name}
-              </div>
-              {isSelected && (
-                <div className="mt-2 text-xs text-neon-cyan font-medium">
-                  Selected
-                </div>
-              )}
             </motion.button>
           );
         })}
