@@ -327,17 +327,7 @@ export const FlashcardSession: React.FC = () => {
             setLoadingStage('done');
             setIsLoading(false);
           } else {
-            // Review mode: if no review words loaded, load normal pool as fallback (plan-specific)
-            if (words.length === 0) {
-              const completedIdsSet = new Set(freshCompletedIds);
-              const pool = getWordPool(
-                activePlan.sourceLanguage,
-                activePlan.targetLanguage,
-                completedIdsSet,
-                POOL_SIZE
-              );
-              setWords(pool);
-            }
+            // Review mode: no fallback - show "Review Complete" screen if no words
             setLoadingStage('done');
             setIsLoading(false);
           }
