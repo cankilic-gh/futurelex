@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Word } from '../../types';
+import { Word, LearningPlan } from '../../types';
+import { useLocalFirst } from '../../context/LocalFirstContext';
 import { Volume2, RotateCw, BookmarkCheck, CheckCircle } from 'lucide-react';
 
 // Simple phonetic conversion helper
@@ -53,13 +54,22 @@ interface CardProps {
 
 export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted = false }) => {
   const [isFlipped, setIsFlipped] = useState(false);
+  const { activePlan } = useLocalFirst();
 
   const handleFlip = () => setIsFlipped(!isFlipped);
 
+  // Determine which text to show based on active plan
+  // Front (question): Target language (what user is learning)
+  // Back (answer): Source language (what user knows)
+  const questionText = word.targetText || word.english || '';
+  const answerText = word.sourceText || word.turkish || '';
+  const targetLang = activePlan?.targetLanguage || 'en';
+  const sourceLang = activePlan?.sourceLanguage || 'tr';
+
   const speak = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const utterance = new SpeechSynthesisUtterance(word.english);
-    utterance.lang = 'en-US';
+    const utterance = new SpeechSynthesisUtterance(questionText);
+    utterance.lang = targetLang === 'en' ? 'en-US' : targetLang === 'tr' ? 'tr-TR' : targetLang;
     window.speechSynthesis.speak(utterance);
   };
 
@@ -124,15 +134,15 @@ export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted =
                 </span>
               )}
               <span className="text-xs font-medium text-slate-300 italic">
-                {word.pronunciation || getPhonetic(word.english)}
+                {word.pronunciation || (targetLang === 'en' ? getPhonetic(questionText) : '')}
               </span>
               <span className="text-xs font-medium text-slate-500 uppercase">
                 {word.type}
               </span>
             </div>
             
-            <motion.h2 
-              className="text-5xl md:text-6xl font-extrabold mb-6 tracking-tight text-center"
+            <motion.h2
+              className="text-5xl md:text-6xl font-extrabold mb-6 tracking-tight text-center leading-tight pb-2"
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: "spring", stiffness: 200 }}
@@ -142,10 +152,11 @@ export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted =
                 WebkitTextFillColor: 'transparent',
                 backgroundClip: 'text',
                 textShadow: '0 0 30px rgba(255, 255, 255, 0.3)',
-                filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))'
+                filter: 'drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3))',
+                lineHeight: 1.2,
               }}
             >
-              {word.english}
+              {questionText}
             </motion.h2>
             
             {/* Subtle audio button - less prominent */}
@@ -194,7 +205,7 @@ export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted =
                 backgroundClip: 'text'
               }}
             >
-              {word.turkish}
+              {answerText}
             </h3>
             
             <div 
