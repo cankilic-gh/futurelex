@@ -368,7 +368,7 @@ export const FlashcardSession: React.FC = () => {
     };
 
     fetchUserWords();
-  }, [user, activePlan, isReviewMode]);
+  }, [user?.uid, activePlan?.id, isReviewMode]);
 
   // Refill pool when it gets low (plan-specific)
   const refillPool = (currentWords: Word[], completedIds: string[]) => {
