@@ -486,60 +486,28 @@ export const FlashcardSession: React.FC = () => {
       nextWordId: words[nextIndex]?.id 
     });
     
-    // Remove completed word from pool if needed, then update index
+    // Remove completed word from pool if needed
     if (isCurrentlyCompleted) {
-      setWords(prevWords => {
-        const filteredWords = prevWords.filter(w => w.id !== currentWord.id);
-        console.log("[PAGINATE] Filtered words:", {
-          prevLength: prevWords.length,
-          newLength: filteredWords.length,
-          removedWordId: currentWord.id
-        });
-        
-        // Adjust nextIndex for filtered array
-        const adjustedIndex = filteredWords.length > 0 
-          ? Math.max(0, Math.min(nextIndex, filteredWords.length - 1))
-          : 0;
-        
-        // Update index after words are filtered
-        setTimeout(() => {
-          setDirection(newDirection);
-          setCurrentIndex(adjustedIndex);
-          console.log("[PAGINATE] Index updated after filtering:", {
-            adjustedIndex,
-            nextWordId: filteredWords[adjustedIndex]?.id
-          });
-        }, 0);
-        
-        // Refill pool asynchronously when it drops below half (only if not in review mode)
-        if (!isReviewMode && filteredWords.length < 50) {
-          // CRITICAL: Capture completedWordIds at the time of setTimeout to avoid closure issues
-          const currentCompletedIds = [...completedWordIds]; // Create a copy
-          setTimeout(() => {
-            setWords(prevWords2 => {
-              console.log("[PAGINATE] Refilling pool with completedIds:", currentCompletedIds);
-              const refilledWords = refillPool(prevWords2, currentCompletedIds);
-              console.log("[PAGINATE] Pool refilled:", {
-                prevLength: prevWords2.length,
-                newLength: refilledWords.length,
-                completedIdsLength: currentCompletedIds.length
-              });
-              return refilledWords;
-            });
-          }, 100);
+      const filteredWords = words.filter(w => w.id !== currentWord.id);
+
+      // Adjust index for the removed word
+      const adjustedIndex = filteredWords.length > 0
+        ? Math.max(0, Math.min(nextIndex > currentIndex ? nextIndex - 1 : nextIndex, filteredWords.length - 1))
+        : 0;
+
+      setWords(filteredWords);
+      setCurrentIndex(adjustedIndex);
+
+      // Refill pool if needed (sync, no setTimeout)
+      if (!isReviewMode && filteredWords.length < 50) {
+        const refilledWords = refillPool(filteredWords, completedWordIds);
+        if (refilledWords.length > filteredWords.length) {
+          setWords(refilledWords);
         }
-        
-        return filteredWords;
-      });
+      }
     } else {
-      // Normal navigation - just update index and direction
-      setDirection(newDirection);
+      // Normal navigation - just update index
       setCurrentIndex(nextIndex);
-      console.log("[PAGINATE] Normal navigation, index updated:", {
-        nextIndex,
-        nextWordId: words[nextIndex]?.id,
-        nextWordEnglish: words[nextIndex]?.english
-      });
     }
   };
 
