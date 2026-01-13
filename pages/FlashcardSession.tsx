@@ -1207,11 +1207,10 @@ export const FlashcardSession: React.FC = () => {
               style={{ position: 'absolute', zIndex: 10, pointerEvents: 'auto' }}
             >
               {currentWord && (
-                <Card 
-                  word={currentWord} 
-                  isSaved={isSaved} 
+                <Card
+                  word={currentWord}
+                  isSaved={isSaved}
                   isCompleted={isCompleted}
-                  key={`card-${currentWord.id}-${isSaved}-${isCompleted}`}
                 />
               )}
             </motion.div>
@@ -1263,9 +1262,8 @@ export const FlashcardSession: React.FC = () => {
               {/* Know It - Primary Action */}
               <motion.button
                 onClick={() => {
-                  toggleCompleteWord();
                   if (!isCompleted) {
-                    setTimeout(() => words.length > 0 && paginate(1), 300);
+                    toggleCompleteWord();
                   }
                 }}
                 disabled={isSaving || isCompleting || !currentWord}
