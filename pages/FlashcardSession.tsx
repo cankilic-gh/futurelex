@@ -801,37 +801,14 @@ export const FlashcardSession: React.FC = () => {
           });
         });
       } else {
-        // Update state FIRST (optimistic update) - this ensures UI updates immediately
-        console.log("[TOGGLE COMPLETE] Updating state FIRST (optimistic), current completedWordIds:", completedWordIds, "word.id:", word.id);
-        setCompletedWordIds(prev => {
-          console.log("[TOGGLE COMPLETE] INSIDE setCompletedWordIds callback, prev:", prev, "word.id:", word.id);
-          const alreadyIncluded = prev.includes(word.id);
-          console.log("[TOGGLE COMPLETE] Word already in completed?", alreadyIncluded);
+        // Update state FIRST (optimistic update)
+        const newCompletedIds = [...completedWordIds, word.id];
+        setCompletedWordIds(newCompletedIds);
 
-          if (alreadyIncluded) {
-            console.log("[TOGGLE COMPLETE] Word already in completed, but creating new array anyway for React");
-            // CRITICAL: Always return a new array reference so React detects the change
-            const newArray = [...prev];
-            console.log("[TOGGLE COMPLETE] Returning new array (same content):", newArray);
-            return newArray;
-          }
-
-          const newArray = [...prev, word.id];
-          console.log("[TOGGLE COMPLETE] State updated - added (optimistic):", {
-            newSize: newArray.length,
-            wordId: word.id,
-            prevSize: prev.length,
-            prevArray: prev,
-            newArrayContents: newArray
-          });
-
-          // Update plan progress with new count
-          if (activePlan) {
-            updatePlanProgress(activePlan.id, { wordsLearned: newArray.length });
-          }
-
-          return newArray;
-        });
+        // Update plan progress
+        if (activePlan) {
+          updatePlanProgress(activePlan.id, { wordsLearned: newCompletedIds.length });
+        }
         
         // If word is saved, remove it from saved first (mutual exclusivity)
         if (savedWordIds.includes(word.id)) {
