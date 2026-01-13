@@ -289,36 +289,136 @@ const rawWords = [
   { en: "Zenith", tr: "Zirve", ex: "The sun was at its zenith.", type: "noun", lvl: 10 },
 ];
 
-// Convert all raw words to Word format
-const allWords: Word[] = rawWords.map((w, index) => ({
+// Convert all raw words to Word format (English-Turkish pair)
+// This maintains backward compatibility while supporting new structure
+const allWordsEnTr: Word[] = rawWords.map((w, index) => ({
   id: `${w.en.toLowerCase()}-${w.lvl}-${index}`,
-  english: w.en,
-  turkish: w.tr,
+  sourceText: w.en,
+  targetText: w.tr,
+  sourceLanguage: 'en',
+  targetLanguage: 'tr',
   example: w.ex,
   type: w.type,
-  level: w.lvl
+  level: w.lvl,
+  // Legacy fields for backward compatibility
+  english: w.en,
+  turkish: w.tr,
 }));
 
-// Get a pool of 100 words, excluding completed ones, starting from harder levels
-export const getWordPool = (excludeWordIds: Set<string> = new Set(), poolSize: number = 100): Word[] => {
-  // Filter out completed words
-  const availableWords = allWords.filter(word => !excludeWordIds.has(word.id));
-  
-  // Sort by level descending (harder first: 10 -> 1), then shuffle within same level
-  const sortedByLevel = availableWords.sort((a, b) => {
-    if (b.level !== a.level) {
-      return b.level - a.level; // Higher level first
-    }
-    return Math.random() - 0.5; // Shuffle within same level
-  });
-  
-  // Take poolSize words (prioritizing harder levels)
-  return sortedByLevel.slice(0, Math.min(poolSize, sortedByLevel.length));
+// Word data structure: words[sourceLanguage][targetLanguage]
+// Currently only English-Turkish is populated, others can be added later
+const wordsByLanguagePair: Record<string, Record<string, Word[]>> = {
+  en: {
+    tr: allWordsEnTr,
+    // Future: Add more language pairs here
+    // de: allWordsEnDe,
+    // fr: allWordsEnFr,
+    // it: allWordsEnIt,
+  },
+  // Future: Add reverse pairs (Turkish-English, etc.)
+  // tr: {
+  //   en: allWordsTrEn,
+  // },
 };
 
-// Get all available words (for refilling pool), sorted by level descending
-export const getAllAvailableWords = (excludeWordIds: Set<string> = new Set()): Word[] => {
-  const available = allWords.filter(word => !excludeWordIds.has(word.id));
+// Get words for a specific language pair
+// If direct pair doesn't exist, try reverse pair (swap source and target)
+const getWordsForPair = (sourceLanguage: string, targetLanguage: string): Word[] => {
+  // Try direct pair first
+  const directWords = wordsByLanguagePair[sourceLanguage]?.[targetLanguage];
+  if (directWords && directWords.length > 0) {
+    return directWords;
+  }
+  
+  // Try reverse pair (e.g., if tr->en doesn't exist, use en->tr and swap)
+  const reverseWords = wordsByLanguagePair[targetLanguage]?.[sourceLanguage];
+  if (reverseWords && reverseWords.length > 0) {
+    console.log(`[DATA] Using reverse pair: ${targetLanguage}->${sourceLanguage} for ${sourceLanguage}->${targetLanguage}`);
+    // Swap source and target text
+    return reverseWords.map(word => ({
+      ...word,
+      id: `${word.id}-reversed`,
+      sourceText: word.targetText || word.turkish || word.english || '',
+      targetText: word.sourceText || word.english || word.turkish || '',
+      sourceLanguage: sourceLanguage,
+      targetLanguage: targetLanguage,
+      // Keep legacy fields for backward compatibility
+      english: word.targetText || word.turkish || word.english,
+      turkish: word.sourceText || word.english || word.turkish,
+    }));
+  }
+  
+  // No words found for either direction
+  return [];
+};
+
+// Cache for pre-sorted words by language pair to avoid repeated sorting
+const sortedWordsCache: Record<string, Word[]> = {};
+
+// Get cache key for language pair
+const getCacheKey = (sourceLang: string, targetLang: string) => `${sourceLang}-${targetLang}`;
+
+// Get a pool of words for a specific language pair, excluding completed ones
+export const getWordPool = (
+  sourceLanguage: string = 'en',
+  targetLanguage: string = 'tr',
+  excludeWordIds: Set<string> = new Set(),
+  poolSize: number = 100
+): Word[] => {
+  // Get words for the language pair
+  const pairWords = getWordsForPair(sourceLanguage, targetLanguage);
+  
+  // If no words for this pair, return empty array
+  if (pairWords.length === 0) {
+    console.warn(`No words available for ${sourceLanguage} → ${targetLanguage}`);
+    return [];
+  }
+  
+  // Filter out completed words (fast operation)
+  const availableWords = excludeWordIds.size > 0 
+    ? pairWords.filter(word => !excludeWordIds.has(word.id))
+    : pairWords;
+  
+  if (availableWords.length === 0) {
+    return [];
+  }
+  
+  // Use cached sorted words if available, otherwise sort and cache
+  const cacheKey = getCacheKey(sourceLanguage, targetLanguage);
+  let sortedWords = sortedWordsCache[cacheKey];
+  
+  if (!sortedWords || sortedWords.length !== pairWords.length) {
+    // Sort by level descending (harder first: 10 -> 1)
+    // Don't shuffle here - shuffle only the final pool for variety
+    sortedWords = [...pairWords].sort((a, b) => b.level - a.level);
+    sortedWordsCache[cacheKey] = sortedWords;
+  }
+  
+  // Filter sorted words by excludeWordIds if needed
+  const filteredSorted = excludeWordIds.size > 0
+    ? sortedWords.filter(word => !excludeWordIds.has(word.id))
+    : sortedWords;
+  
+  // Shuffle first poolSize words for variety (only shuffle what we need)
+  const pool = filteredSorted.slice(0, Math.min(poolSize * 2, filteredSorted.length));
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  
+  // Take poolSize words
+  return pool.slice(0, Math.min(poolSize, pool.length));
+};
+
+// Get all available words for a language pair, sorted by level descending
+export const getAllAvailableWords = (
+  sourceLanguage: string = 'en',
+  targetLanguage: string = 'tr',
+  excludeWordIds: Set<string> = new Set()
+): Word[] => {
+  const pairWords = getWordsForPair(sourceLanguage, targetLanguage);
+  const available = pairWords.filter(word => !excludeWordIds.has(word.id));
+  
   // Sort by level descending (harder first)
   return available.sort((a, b) => {
     if (b.level !== a.level) {
@@ -329,12 +429,17 @@ export const getAllAvailableWords = (excludeWordIds: Set<string> = new Set()): W
 };
 
 // Legacy function for backward compatibility (if needed)
-export const getWordsByLevel = (level: number): Word[] => {
-  return allWords
+export const getWordsByLevel = (
+  level: number,
+  sourceLanguage: string = 'en',
+  targetLanguage: string = 'tr'
+): Word[] => {
+  const pairWords = getWordsForPair(sourceLanguage, targetLanguage);
+  return pairWords
     .filter(w => w.level === level)
     .map((w, index) => ({
       ...w,
-      id: `${w.english.toLowerCase()}-${w.level}-${index}`
+      id: `${(w.sourceText || w.english || '').toLowerCase()}-${w.level}-${index}`
     }));
 };
 

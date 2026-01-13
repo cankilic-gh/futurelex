@@ -3,10 +3,13 @@ import { LEVELS } from '../services/data';
 import { Link } from 'react-router-dom';
 import { Background } from '../components/Layout/Background';
 import { Navbar } from '../components/Layout/Navbar';
+import { useLocalFirst } from '../context/LocalFirstContext';
+import { getLanguageByCode } from '../services/languages';
 import { motion } from 'framer-motion';
 import { Database, Unlock } from 'lucide-react';
 
 export const LevelSelect: React.FC = () => {
+  const { activePlan } = useLocalFirst();
   const container = {
     hidden: { opacity: 0 },
     show: {
@@ -32,6 +35,14 @@ export const LevelSelect: React.FC = () => {
           <h1 className="text-4xl md:text-5xl font-bold bg-clip-text text-transparent bg-gradient-to-b from-white to-slate-500 mb-4">
             Select Data Stream
           </h1>
+          {activePlan && (
+            <div className="mb-3 flex items-center justify-center gap-2">
+              <span className="text-2xl">{getLanguageByCode(activePlan.sourceLanguage)?.flag}</span>
+              <span className="text-slate-500">→</span>
+              <span className="text-2xl">{getLanguageByCode(activePlan.targetLanguage)?.flag}</span>
+              <span className="text-slate-400 text-sm ml-2">{activePlan.name}</span>
+            </div>
+          )}
           <p className="text-slate-400 max-w-lg mx-auto">
             Access specific vocabulary matrices based on proficiency level. All sectors are unlocked for free roaming.
           </p>
