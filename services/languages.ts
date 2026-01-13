@@ -37,6 +37,13 @@ export const SUPPORTED_LANGUAGES: Language[] = [
     flag: '🇮🇹',
     rtl: false,
   },
+  {
+    code: 'es',
+    name: 'Spanish',
+    nativeName: 'Español',
+    flag: '🇪🇸',
+    rtl: false,
+  },
 ];
 
 // Language lookup by code
