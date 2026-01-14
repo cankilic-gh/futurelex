@@ -6,15 +6,17 @@
  * Users can start learning immediately.
  */
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { LocalFirstProvider, useLocalFirst } from './context/LocalFirstContext';
 import { AuthProvider } from './context/AuthContext';
-import { FlashcardSession } from './pages/FlashcardSession';
-import { Dashboard } from './pages/Dashboard';
-import { PlanManager } from './pages/PlanManager';
-import { Auth } from './pages/Auth';
 import { SyncIndicator } from './components/ui/SyncIndicator';
+
+// Lazy load pages for faster navigation
+const FlashcardSession = React.lazy(() => import('./pages/FlashcardSession').then(m => ({ default: m.FlashcardSession })));
+const Dashboard = React.lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const PlanManager = React.lazy(() => import('./pages/PlanManager').then(m => ({ default: m.PlanManager })));
+const Auth = React.lazy(() => import('./pages/Auth').then(m => ({ default: m.Auth })));
 
 // Simple wrapper to check if user has plans
 const RequirePlan: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -39,36 +41,38 @@ const AppContent: React.FC = () => {
       {/* Sync status indicator (top-right corner) */}
       <SyncIndicator />
 
-      <Routes>
-        {/* Default: go to learn if has plan, otherwise plans */}
-        <Route path="/" element={<Navigate to="/learn" replace />} />
+      <Suspense fallback={null}>
+        <Routes>
+          {/* Default: go to learn if has plan, otherwise plans */}
+          <Route path="/" element={<Navigate to="/learn" replace />} />
 
-        {/* Plan Manager - create/manage learning plans */}
-        <Route path="/plans" element={<PlanManager />} />
+          {/* Plan Manager - create/manage learning plans */}
+          <Route path="/plans" element={<PlanManager />} />
 
-        {/* Learn - flashcard session */}
-        <Route
-          path="/learn"
-          element={
-            <RequirePlan>
-              <FlashcardSession />
-            </RequirePlan>
-          }
-        />
+          {/* Learn - flashcard session */}
+          <Route
+            path="/learn"
+            element={
+              <RequirePlan>
+                <FlashcardSession />
+              </RequirePlan>
+            }
+          />
 
-        {/* Dashboard - progress & stats */}
-        <Route
-          path="/dashboard"
-          element={
-            <RequirePlan>
-              <Dashboard />
-            </RequirePlan>
-          }
-        />
+          {/* Dashboard - progress & stats */}
+          <Route
+            path="/dashboard"
+            element={
+              <RequirePlan>
+                <Dashboard />
+              </RequirePlan>
+            }
+          />
 
-        {/* Auth page - login/signup for cloud sync */}
-        <Route path="/auth" element={<Auth />} />
-      </Routes>
+          {/* Auth page - login/signup for cloud sync */}
+          <Route path="/auth" element={<Auth />} />
+        </Routes>
+      </Suspense>
     </>
   );
 };

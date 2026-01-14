@@ -1,8 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { LayoutGrid, BookMarked, Languages, User, LogOut, LogIn, ChevronDown } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
+
+// Prefetch functions for lazy-loaded pages
+const prefetchMap: Record<string, () => void> = {
+  '/plans': () => import('../../pages/PlanManager'),
+  '/learn': () => import('../../pages/FlashcardSession'),
+  '/dashboard': () => import('../../pages/Dashboard'),
+};
 
 export const Navbar: React.FC = () => {
   const location = useLocation();
@@ -15,6 +22,12 @@ export const Navbar: React.FC = () => {
     { path: '/learn', label: 'Learn', icon: LayoutGrid },
     { path: '/dashboard', label: 'Saved', icon: BookMarked },
   ];
+
+  // Prefetch page chunk on hover/touch
+  const handlePrefetch = useCallback((path: string) => {
+    const prefetch = prefetchMap[path];
+    if (prefetch) prefetch();
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -51,6 +64,8 @@ export const Navbar: React.FC = () => {
                 <Link
                   key={item.path}
                   to={item.path}
+                  onMouseEnter={() => handlePrefetch(item.path)}
+                  onTouchStart={() => handlePrefetch(item.path)}
                   className={`
                     flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all
                     ${isActive

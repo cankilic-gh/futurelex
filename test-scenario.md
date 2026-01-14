@@ -106,3 +106,4 @@ Save ve Check butonlarının birbirini dışlaması, toggle çalışması ve nex
 ❌ State'ler kaybolmamalı
 ❌ Counter'lar yanlış saymamalı
 
+
