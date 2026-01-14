@@ -1133,7 +1133,7 @@ export const FlashcardSession: React.FC = () => {
         </div>
 
         <div
-          className="w-full max-w-md h-[450px] relative flex items-center justify-center"
+          className="w-full max-w-md h-[min(450px,60vh)] min-h-[300px] relative flex items-center justify-center"
           style={{ position: 'relative', zIndex: 10 }}
         >
           {currentWord && (

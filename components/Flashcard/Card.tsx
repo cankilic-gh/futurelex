@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Word, LearningPlan } from '../../types';
 import { useLocalFirst } from '../../context/LocalFirstContext';
@@ -56,6 +56,11 @@ export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted =
   const [isFlipped, setIsFlipped] = useState(false);
   const { activePlan } = useLocalFirst();
 
+  // Reset flip state when word changes (next/prev card)
+  useEffect(() => {
+    setIsFlipped(false);
+  }, [word.id]);
+
   const handleFlip = () => setIsFlipped(!isFlipped);
 
   // Determine which text to show based on active plan
@@ -74,8 +79,8 @@ export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted =
   };
 
   return (
-    <div 
-      className="perspective-1000 w-full max-w-md h-[400px] cursor-pointer" 
+    <div
+      className="perspective-1000 w-full max-w-md h-[min(400px,55vh)] min-h-[280px] cursor-pointer"
       onClick={handleFlip}
       style={{ pointerEvents: 'auto' }}
     >
