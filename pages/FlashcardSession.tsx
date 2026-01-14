@@ -15,7 +15,7 @@ import { Word } from '../types';
 import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, X, Database, Cloud, Sparkles, Layers } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-const POOL_SIZE = 100;
+const POOL_SIZE = 30;
 
 // DEVICE-SPECIFIC USER ID - Each device gets unique ID to prevent data mixing
 // This replaces the old 'local_user' which caused all guests to share the same Firebase path
@@ -246,36 +246,29 @@ export const FlashcardSession: React.FC = () => {
           console.log("[CACHE] Using cached completed words:", { count: completedIds.length });
         }
 
-        // Set cached data immediately for progressive loading
-        if (useCache) {
-          setSavedWordIds(savedIds);
-          setCompletedWordIds(completedIds);
-          
-          // Load word pool immediately with cached data (plan-specific)
-          if (!isReviewMode) {
-            const completedIdsSet = new Set(completedIds);
-            const pool = getWordPool(
-              activePlan.sourceLanguage,
-              activePlan.targetLanguage,
-              completedIdsSet,
-              POOL_SIZE
-            );
-            setWords(pool);
-            setIsLoading(false); // Show words immediately
-          }
+        // INSTANT LOADING: Show cards immediately, don't wait for Firebase
+        // Use cache if available (even expired), otherwise use empty set
+        setSavedWordIds(savedIds);
+        setCompletedWordIds(completedIds);
+
+        if (!isReviewMode) {
+          const completedIdsSet = new Set(completedIds);
+          const pool = getWordPool(
+            activePlan.sourceLanguage,
+            activePlan.targetLanguage,
+            completedIdsSet,
+            POOL_SIZE
+          );
+          setWords(pool);
+          setIsLoading(false); // Show words immediately - don't wait for Firebase!
         }
 
-        // Fetch from Firebase in background (always fetch to keep cache fresh)
-        // Plan-specific collections
+        // Fetch from Firebase in background (fire and forget - don't block UI)
         setLoadingStage('firebase');
-        try {
-          const [savedSnapshot, completedSnapshot] = await Promise.all([
-            getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words'))),
-            getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words')))
-          ]);
-
-          // Optimization: Process only wordId field from documents (ignore other fields like timestamps)
-          // This reduces memory usage and processing time
+        Promise.all([
+          getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words'))),
+          getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words')))
+        ]).then(([savedSnapshot, completedSnapshot]) => {
           const freshSavedIds: string[] = [];
           savedSnapshot.docs.forEach(doc => {
             const data = doc.data();
@@ -283,7 +276,7 @@ export const FlashcardSession: React.FC = () => {
               freshSavedIds.push(data.wordId);
             }
           });
-          
+
           const freshCompletedIds: string[] = [];
           completedSnapshot.docs.forEach(doc => {
             const data = doc.data();
@@ -292,20 +285,18 @@ export const FlashcardSession: React.FC = () => {
             }
           });
 
-          console.log("[FETCH] Loaded saved words from Firebase:", { count: freshSavedIds.length });
-          console.log("[FETCH] Loaded completed words from Firebase:", { count: freshCompletedIds.length });
+          console.log("[FETCH] Background sync completed:", { saved: freshSavedIds.length, completed: freshCompletedIds.length });
 
-          // Update cache (plan-specific)
+          // Update cache
           setCachedWordIds(planCacheKeySaved, freshSavedIds);
           setCachedWordIds(planCacheKeyCompleted, freshCompletedIds);
 
-          // Update state with fresh data (may differ from cache)
+          // Update state silently in background
           setSavedWordIds(freshSavedIds);
           setCompletedWordIds(freshCompletedIds);
 
-          // If we used cache, update word pool with fresh completed IDs (plan-specific)
-          setLoadingStage('pool');
-          if (useCache && !isReviewMode) {
+          // Only update word pool if completed IDs changed significantly
+          if (!isReviewMode && freshCompletedIds.length !== completedIds.length) {
             const freshCompletedIdsSet = new Set(freshCompletedIds);
             const pool = getWordPool(
               activePlan.sourceLanguage,
@@ -314,31 +305,11 @@ export const FlashcardSession: React.FC = () => {
               POOL_SIZE
             );
             setWords(pool);
-          } else if (!isReviewMode) {
-            // If no cache was used, set words now (plan-specific)
-            const completedIdsSet = new Set(freshCompletedIds);
-            const pool = getWordPool(
-              activePlan.sourceLanguage,
-              activePlan.targetLanguage,
-              completedIdsSet,
-              POOL_SIZE
-            );
-            setWords(pool);
-            setLoadingStage('done');
-            setIsLoading(false);
-          } else {
-            // Review mode: no fallback - show "Review Complete" screen if no words
-            setLoadingStage('done');
-            setIsLoading(false);
           }
-        } catch (firebaseError) {
-          console.error("Error fetching from Firebase:", firebaseError);
-          // If cache was used, we already showed words, so just log error
-          // If no cache, fall through to error handling below
-          if (!useCache) {
-            throw firebaseError;
-          }
-        }
+        }).catch(err => {
+          console.error("[FETCH] Background sync failed:", err);
+          // Don't throw - UI is already showing, just log the error
+        });
       } catch (error) {
         console.error("Error fetching user words", error);
         // Fallback: load words even if fetch fails (plan-specific)
@@ -490,7 +461,7 @@ export const FlashcardSession: React.FC = () => {
 
       // Refill pool if needed (sync, no setTimeout)
       // Include current word in completed list to ensure it's not re-added
-      if (!isReviewMode && filteredWords.length < 50) {
+      if (!isReviewMode && filteredWords.length < 15) {
         const allCompletedIds = [...completedWordIds, currentWord.id];
         const refilledWords = refillPool(filteredWords, allCompletedIds);
         if (refilledWords.length > filteredWords.length) {

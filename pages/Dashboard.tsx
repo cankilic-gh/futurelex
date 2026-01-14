@@ -63,49 +63,38 @@ export const Dashboard: React.FC = () => {
     }
 
     const fetchWords = async () => {
-      // PROGRESSIVE LOADING: Load from cache first for instant display
+      // INSTANT LOADING: Show immediately, don't wait for Firebase
       const cacheKey = `${CACHE_KEY_DASHBOARD}_${activePlan.id}`;
       const cached = getCachedWordsForPlan(cacheKey);
-      let useCache = false;
 
-      if (cached && isCacheValid(cached.timestamp)) {
-        setSavedWords(cached.words);
-        setLoading(false); // Show words immediately
-        useCache = true;
-        console.log('[CACHE] Using cached dashboard words:', { count: cached.words.length, planId: activePlan.id });
+      // Use cache if available (even expired), otherwise show empty
+      const cachedWords = cached?.words || [];
+      setSavedWords(cachedWords);
+      setLoading(false); // Show immediately - don't wait for Firebase!
+
+      if (cached) {
+        console.log('[CACHE] Using cached dashboard words:', { count: cachedWords.length, planId: activePlan.id });
       }
 
-      // Fetch from Firebase in background (always fetch to keep cache fresh)
-      try {
-        // Query plan-specific saved words
-        const q = query(
-          collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words')
-        );
-        const querySnapshot = await getDocs(q);
-        const words = querySnapshot.docs.map(doc => ({
-          id: doc.id,
-          planId: activePlan.id,
-          ...doc.data()
-        })) as UserSavedWord[];
-        
-        console.log('[FETCH] Loaded dashboard words from Firebase:', { count: words.length, planId: activePlan.id });
-        
-        // Update cache
-        setCachedWordsForPlan(cacheKey, words);
-        
-        // Update state with fresh data
-        setSavedWords(words);
-        
-        if (!useCache) {
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Failed to fetch saved words", err);
-        // If cache was used, we already showed words, so just log error
-        if (!useCache) {
-          setLoading(false);
-        }
-      }
+      // Fetch from Firebase in background (fire and forget)
+      getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words')))
+        .then(querySnapshot => {
+          const words = querySnapshot.docs.map(doc => ({
+            id: doc.id,
+            planId: activePlan.id,
+            ...doc.data()
+          })) as UserSavedWord[];
+
+          console.log('[FETCH] Background sync completed:', { count: words.length, planId: activePlan.id });
+
+          // Update cache and state
+          setCachedWordsForPlan(cacheKey, words);
+          setSavedWords(words);
+        })
+        .catch(err => {
+          console.error("[FETCH] Background sync failed:", err);
+          // Don't throw - UI is already showing
+        });
     };
 
     fetchWords();
