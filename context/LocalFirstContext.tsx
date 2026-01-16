@@ -29,6 +29,7 @@ interface LocalFirstContextType {
   deletePlan: (planId: string) => void;
   setActivePlan: (planId: string) => void;
   updatePlanProgress: (planId: string, progress: Partial<LearningPlan['progress']>) => void;
+  clearData: () => void;
 
   // Sync
   triggerSync: () => Promise<void>;
@@ -162,6 +163,13 @@ export const LocalFirstProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     scheduleSyncDebounced();
   }, [plans]);
 
+  const clearData = useCallback(() => {
+    setPlans([]);
+    setActivePlanId(null);
+    setSyncStatus('idle');
+    LocalStorage.clearAll();
+  }, []);
+
   // ============================================
   // BACKGROUND SYNC (Silent, non-blocking)
   // ============================================
@@ -259,6 +267,7 @@ export const LocalFirstProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     deletePlan,
     setActivePlan,
     updatePlanProgress,
+    clearData,
     triggerSync,
   };
 
