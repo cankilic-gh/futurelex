@@ -4,8 +4,6 @@ import { useLocalFirst } from '../context/LocalFirstContext';
 import { LocalStorage } from '../services/localStorage';
 import { db } from '../services/firebase';
 import { collection, query, getDocs, deleteDoc, doc, where } from 'firebase/firestore';
-import { Background } from '../components/Layout/Background';
-import { Navbar } from '../components/Layout/Navbar';
 import { UserSavedWord, Word } from '../types';
 import { Trash2, BookMarked, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -140,8 +138,6 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen">
-      <Background />
-      <Navbar />
 
       <div className="max-w-4xl mx-auto pt-32 px-4 pb-20">
         {/* Header */}

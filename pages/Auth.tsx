@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { Background } from '../components/Layout/Background';
 import { motion } from 'framer-motion';
 import { Languages, Mail, Lock, ArrowRight } from 'lucide-react';
 
@@ -30,7 +29,6 @@ export const Auth: React.FC = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
-      <Background />
       
       <motion.div 
         initial={{ opacity: 0, y: 20, scale: 0.95 }}

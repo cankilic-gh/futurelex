@@ -11,6 +11,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { LocalFirstProvider, useLocalFirst } from './context/LocalFirstContext';
 import { AuthProvider } from './context/AuthContext';
 import { SyncIndicator } from './components/ui/SyncIndicator';
+import { Navbar } from './components/Layout/Navbar';
+import { Background } from './components/Layout/Background';
 
 // Lazy load pages for faster navigation
 const FlashcardSession = React.lazy(() => import('./pages/FlashcardSession').then(m => ({ default: m.FlashcardSession })));
@@ -38,6 +40,12 @@ const AppContent: React.FC = () => {
 
   return (
     <>
+      {/* Global Background - stays during navigation */}
+      <Background />
+
+      {/* Global Navbar - stays during navigation */}
+      <Navbar />
+
       {/* Sync status indicator (top-right corner) */}
       <SyncIndicator />
 

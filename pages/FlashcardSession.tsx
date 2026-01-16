@@ -7,8 +7,6 @@ import { LocalStorage } from '../services/localStorage';
 // Firebase imports kept for now - will use local storage as primary
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, getDocs, collection, query, serverTimestamp } from 'firebase/firestore';
-import { Background } from '../components/Layout/Background';
-import { Navbar } from '../components/Layout/Navbar';
 import { Card } from '../components/Flashcard/Card';
 import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
@@ -927,9 +925,7 @@ export const FlashcardSession: React.FC = () => {
     if (!isLoading && words.length === 0 && completedWordIds.length > 0 && !isReviewMode) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
-          <Background />
-          <Navbar />
-          <motion.div
+                    <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="text-center"
@@ -951,9 +947,7 @@ export const FlashcardSession: React.FC = () => {
     if (!isLoading && words.length === 0 && isReviewMode) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
-          <Background />
-          <Navbar />
-          <motion.div
+                    <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="text-center flex flex-col items-center"
@@ -982,9 +976,7 @@ export const FlashcardSession: React.FC = () => {
 
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
-          <Background />
-          <Navbar />
-          <motion.div
+                    <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             className="text-center max-w-md"
@@ -1021,9 +1013,7 @@ export const FlashcardSession: React.FC = () => {
     // GENTLE LOADING - Single breathing card, minimal and calm
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
-        <Background />
-        <Navbar />
-        <motion.div
+                <motion.div
           className="text-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -1080,9 +1070,7 @@ export const FlashcardSession: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col overflow-hidden">
-      <Background />
-      <Navbar />
-
+      
       <main className="flex-1 flex flex-col items-center justify-center px-4 pt-20 pb-32 relative">
         {/* Minimal Progress Bar */}
         <div className="absolute top-24 left-0 w-full flex justify-center z-10">
@@ -1109,6 +1097,7 @@ export const FlashcardSession: React.FC = () => {
         >
           {currentWord && (
             <Card
+              key={currentWord.id}
               word={currentWord}
               isSaved={isSaved}
               isCompleted={isCompleted}

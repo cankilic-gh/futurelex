@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useLocalFirst } from '../context/LocalFirstContext';
-import { Background } from '../components/Layout/Background';
-import { Navbar } from '../components/Layout/Navbar';
 import { LanguageSelector } from '../components/LanguageSelector';
 import { getLanguageByCode, isValidLanguagePair, generatePlanName } from '../services/languages';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -96,8 +94,6 @@ export const PlanManager: React.FC = () => {
 
   return (
     <div className="min-h-screen">
-      <Background />
-      <Navbar />
 
       <div className="max-w-4xl mx-auto pt-32 px-4 pb-20">
         {/* Header with Create Button */}
