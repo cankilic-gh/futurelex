@@ -1,7 +1,57 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 
+// Detect mobile device
+const isMobile = typeof window !== 'undefined' &&
+  (window.innerWidth < 768 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+
 export const Background: React.FC = () => {
+  // Memoize particle positions to prevent recalculation on re-render
+  const particlePositions = useMemo(() =>
+    isMobile ? [] : Array.from({ length: 20 }).map(() => ({
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
+      duration: Math.random() * 5 + 3,
+      delay: Math.random() * 5,
+    })), []);
+
+  // Mobile: Static background with CSS only (no JS animations)
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-[-1] overflow-hidden pointer-events-none">
+        {/* Static gradient background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950" />
+
+        {/* Static blobs - CSS only, no animation */}
+        <div
+          className="absolute w-96 h-96 bg-neon-cyan/15 rounded-full mix-blend-screen filter blur-[80px]"
+          style={{ top: '10%', left: '20%' }}
+        />
+        <div
+          className="absolute w-96 h-96 bg-neon-purple/15 rounded-full mix-blend-screen filter blur-[80px]"
+          style={{ top: '5%', right: '20%' }}
+        />
+        <div
+          className="absolute w-80 h-80 bg-neon-pink/10 rounded-full mix-blend-screen filter blur-[60px]"
+          style={{ bottom: '10%', left: '30%' }}
+        />
+
+        {/* Static grid */}
+        <div
+          className="absolute inset-0 opacity-5"
+          style={{
+            backgroundImage: `
+              linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)
+            `,
+            backgroundSize: '50px 50px'
+          }}
+        />
+      </div>
+    );
+  }
+
+  // Desktop: Full animated background
   return (
     <div className="fixed inset-0 z-[-1] overflow-hidden pointer-events-none">
       {/* Animated colorful blobs with Framer Motion */}
@@ -46,23 +96,20 @@ export const Background: React.FC = () => {
         transition={{ duration: 15, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
       />
 
-      {/* Floating Particles */}
-      {Array.from({ length: 20 }).map((_, i) => (
+      {/* Floating Particles - Desktop only */}
+      {particlePositions.map((pos, i) => (
         <motion.div
           key={i}
           className="absolute w-1 h-1 bg-neon-cyan/40 rounded-full"
-          style={{
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`
-          }}
+          style={{ left: pos.left, top: pos.top }}
           animate={{
             y: [0, -30, 0],
             opacity: [0.2, 0.8, 0.2]
           }}
           transition={{
-            duration: Math.random() * 5 + 3,
+            duration: pos.duration,
             repeat: Infinity,
-            delay: Math.random() * 5,
+            delay: pos.delay,
             ease: 'easeInOut'
           }}
         />
@@ -70,9 +117,6 @@ export const Background: React.FC = () => {
 
       {/* Base gradient */}
       <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 backdrop-blur-3xl" />
-
-      {/* Subtle texture */}
-      <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-5 brightness-100 contrast-150"></div>
 
       {/* Animated grid pattern for game feel */}
       <motion.div
