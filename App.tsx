@@ -1,16 +1,14 @@
 /**
- * FUTURELEX - LOCAL FIRST APP
+ * FUTURELEX - FIREBASE SYNCED APP
  *
- * No more waiting for Firebase!
- * App loads instantly from local storage.
- * Users can start learning immediately.
+ * Plans and progress sync to Firebase.
+ * Data persists across devices when logged in.
  */
 
 import React, { Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { LocalFirstProvider, useLocalFirst } from './context/LocalFirstContext';
+import { PlanProvider, usePlan } from './context/PlanContext';
 import { AuthProvider } from './context/AuthContext';
-import { SyncIndicator } from './components/ui/SyncIndicator';
 import { Navbar } from './components/Layout/Navbar';
 import { Background } from './components/Layout/Background';
 
@@ -22,21 +20,28 @@ const Auth = React.lazy(() => import('./pages/Auth').then(m => ({ default: m.Aut
 
 // Simple wrapper to check if user has plans
 const RequirePlan: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { activePlan } = useLocalFirst();
+  const { activePlan, plans, loading, isReady } = usePlan();
+
+  console.log('[RequirePlan] State:', { loading, isReady, activePlan: activePlan?.name, plansCount: plans.length });
+
+  // Wait for plans to load
+  if (loading) {
+    console.log('[RequirePlan] Still loading, returning null');
+    return null;
+  }
 
   if (!activePlan) {
+    console.log('[RequirePlan] No active plan, redirecting to /plans');
     return <Navigate to="/plans" replace />;
   }
 
+  console.log('[RequirePlan] Rendering children with plan:', activePlan.name);
   return <>{children}</>;
 };
 
 // Main App Content
 const AppContent: React.FC = () => {
-  const { isReady } = useLocalFirst();
-
-  // App is always ready with local-first approach!
-  // No loading screen needed anymore.
+  const { isReady } = usePlan();
 
   return (
     <>
@@ -45,9 +50,6 @@ const AppContent: React.FC = () => {
 
       {/* Global Navbar - stays during navigation */}
       <Navbar />
-
-      {/* Sync status indicator (top-right corner) */}
-      <SyncIndicator />
 
       <Suspense fallback={null}>
         <Routes>
@@ -98,9 +100,9 @@ function App() {
   return (
     <Router>
       <AuthProvider>
-        <LocalFirstProvider>
+        <PlanProvider>
           <AppContent />
-        </LocalFirstProvider>
+        </PlanProvider>
       </AuthProvider>
     </Router>
   );

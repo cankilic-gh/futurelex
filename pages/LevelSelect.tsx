@@ -3,13 +3,13 @@ import { LEVELS } from '../services/data';
 import { Link } from 'react-router-dom';
 import { Background } from '../components/Layout/Background';
 import { Navbar } from '../components/Layout/Navbar';
-import { useLocalFirst } from '../context/LocalFirstContext';
+import { usePlan } from '../context/PlanContext';
 import { getLanguageByCode } from '../services/languages';
 import { motion } from 'framer-motion';
 import { Database, Unlock } from 'lucide-react';
 
 export const LevelSelect: React.FC = () => {
-  const { activePlan } = useLocalFirst();
+  const { activePlan } = usePlan();
   const container = {
     hidden: { opacity: 0 },
     show: {

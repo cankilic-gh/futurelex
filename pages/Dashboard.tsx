@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useLocalFirst } from '../context/LocalFirstContext';
+import { usePlan } from '../context/PlanContext';
 import { LocalStorage } from '../services/localStorage';
 import { db } from '../services/firebase';
 import { collection, query, getDocs, deleteDoc, doc, where } from 'firebase/firestore';
@@ -8,13 +8,11 @@ import { UserSavedWord, Word } from '../types';
 import { Trash2, BookMarked, Play } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getLanguageByCode } from '../services/languages';
+import { useAuth } from '../context/AuthContext';
 
 // Cache configuration
 const CACHE_KEY_DASHBOARD = 'futurelex_dashboard_words_cache';
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-
-// DEVICE-SPECIFIC USER ID - Each device gets unique ID to prevent data mixing
-const getLocalUser = () => ({ uid: LocalStorage.getDeviceId() });
 
 // Cache utility functions (plan-specific)
 function getCachedWordsForPlan(cacheKey: string): { words: UserSavedWord[], timestamp: number } | null {
@@ -46,10 +44,18 @@ function isCacheValid(timestamp: number): boolean {
 }
 
 export const Dashboard: React.FC = () => {
-  // LOCAL FIRST - No auth needed
-  const { activePlan } = useLocalFirst();
-  // DEVICE-SPECIFIC: Each device gets unique user ID
-  const user = useMemo(() => getLocalUser(), []);
+  // Get activePlan from PlanContext (synced with Firebase)
+  const { activePlan } = usePlan();
+  // Use real Firebase auth user - this ensures data persists across sessions/devices
+  const { user: authUser } = useAuth();
+  // Fall back to device ID for guests (not logged in), but prefer real user UID
+  const user = useMemo(() => {
+    if (authUser) {
+      return { uid: authUser.uid };
+    }
+    // Guest fallback - use device ID
+    return { uid: LocalStorage.getDeviceId() };
+  }, [authUser]);
   const navigate = useNavigate();
   const [savedWords, setSavedWords] = useState<UserSavedWord[]>([]);
   const [loading, setLoading] = useState(true);

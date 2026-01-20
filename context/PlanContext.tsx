@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { db } from '../services/firebase';
 import { 
@@ -24,9 +24,11 @@ interface PlanContextType {
   activePlan: LearningPlan | null;
   plans: LearningPlan[];
   loading: boolean;
+  isReady: boolean;
   createPlan: (sourceLanguage: string, targetLanguage: string, name?: string) => Promise<LearningPlan>;
   deletePlan: (planId: string) => Promise<void>;
   setActivePlan: (planId: string) => Promise<void>;
+  updatePlanProgress: (planId: string, progress: Partial<LearningPlan['progress']>) => void;
   refreshPlans: () => Promise<void>;
 }
 
@@ -43,181 +45,125 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [activePlan, setActivePlanState] = useState<LearningPlan | null>(null);
   const [plans, setPlans] = useState<LearningPlan[]>([]);
   const [loading, setLoading] = useState(true);
+  const isCreatingPlanRef = useRef(false);
 
   // Load user's plans and active plan
   useEffect(() => {
-    console.log('[PLAN CONTEXT] ===== useEffect triggered =====');
-    console.log('[PLAN CONTEXT] authLoading:', authLoading);
-    console.log('[PLAN CONTEXT] user:', user ? { uid: user.uid, email: user.email } : 'null');
-    
+    console.log('[PLAN] useEffect - authLoading:', authLoading, 'user:', user?.email || 'none');
+
+    // Safety timeout - ensure loading becomes false within 10 seconds
+    const safetyTimeout = setTimeout(() => {
+      console.warn('[PLAN] Safety timeout triggered - forcing loading to false');
+      setLoading(false);
+    }, 10000);
+
     // Wait for auth to finish loading
     if (authLoading) {
-      console.log('[PLAN CONTEXT] Auth still loading, waiting...');
-      return;
+      console.log('[PLAN] Waiting for auth...');
+      return () => clearTimeout(safetyTimeout);
     }
-    
+
     if (!user) {
-      console.log('[PLAN CONTEXT] No user, clearing plans');
+      console.log('[PLAN] No user - clearing state');
       setPlans([]);
       setActivePlanState(null);
       setLoading(false);
-      return;
+      clearTimeout(safetyTimeout);
+      return () => clearTimeout(safetyTimeout);
     }
 
     const loadPlans = async () => {
-      // Skip if we're currently creating a plan
-      if (isCreatingPlanRef.current) {
-        console.log('[PLAN CONTEXT] loadPlans skipped - plan creation in progress');
-        return;
-      }
-      
-      console.log('[PLAN CONTEXT] loadPlans called for user:', user.uid);
+      console.log('[PLAN] loadPlans START for:', user.uid);
       try {
-        // Load all plans for user
-        const plansRef = collection(db, 'users', user.uid, 'plans');
-        console.log('[PLAN CONTEXT] Collection path:', plansRef.path);
-        console.log('[PLAN CONTEXT] Fetching plans from Firestore...');
-        
-        // Use getDocs (will use cache if available, server if not)
-        // This is faster and Firestore handles cache/server automatically
-        const plansSnapshot = await getDocs(plansRef);
-        console.log('[PLAN CONTEXT] Plans snapshot size:', plansSnapshot.docs.length);
-        console.log('[PLAN CONTEXT] Plans snapshot empty:', plansSnapshot.empty);
-        console.log('[PLAN CONTEXT] Plans snapshot metadata:', {
-          fromCache: plansSnapshot.metadata.fromCache,
-          hasPendingWrites: plansSnapshot.metadata.hasPendingWrites
-        });
-        
-        // Log all document IDs
-        if (plansSnapshot.docs.length > 0) {
-          console.log('[PLAN CONTEXT] Found document IDs:', plansSnapshot.docs.map(d => d.id));
-        } else {
-          console.warn('[PLAN CONTEXT] ⚠️ No documents found in collection!');
-          
-          // If data came from cache and no plans found, try server once
-          if (plansSnapshot.metadata.fromCache && plansSnapshot.docs.length === 0) {
-            console.log('[PLAN CONTEXT] Cache returned 0 docs, checking server...');
-            try {
-              const serverSnapshot = await getDocsFromServer(plansRef);
-              if (serverSnapshot.docs.length > 0) {
-                console.log('[PLAN CONTEXT] ✅ Found plans on server!');
-                const serverPlans: LearningPlan[] = serverSnapshot.docs.map(doc => ({
-                  id: doc.id,
-                  ...doc.data()
-                } as LearningPlan));
-                setPlans(serverPlans);
-                const active = serverPlans.find(p => p.isActive) || serverPlans[0] || null;
-                setActivePlanState(active);
-                setLoading(false);
-                return;
-              }
-            } catch (serverError) {
-              console.warn('[PLAN CONTEXT] Server check failed:', serverError);
-            }
-          }
+        // Skip if we're currently creating a plan (inside try so finally still runs)
+        if (isCreatingPlanRef.current) {
+          console.log('[PLAN] Skipped - plan creation in progress');
+          return;
         }
-        
-        const loadedPlans: LearningPlan[] = plansSnapshot.docs.map(doc => {
-          const data = doc.data();
-          console.log('[PLAN CONTEXT] Plan doc:', { id: doc.id, data });
-          return {
-            id: doc.id,
-            ...data
-          } as LearningPlan;
-        });
 
-        console.log('[PLAN CONTEXT] Loaded plans:', loadedPlans);
+        // Load all plans for user - use server directly to avoid cache issues
+        const plansRef = collection(db, 'users', user.uid, 'plans');
+        console.log('[PLAN] Fetching from Firebase server...');
+
+        // Add timeout to Firebase call to catch hanging requests
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Firebase timeout after 5s')), 5000)
+        );
+
+        const plansSnapshot = await Promise.race([
+          getDocsFromServer(plansRef),
+          timeoutPromise
+        ]) as any;
+
+        console.log('[PLAN] Firebase returned:', plansSnapshot.docs.length, 'plans');
+
+        const loadedPlans: LearningPlan[] = plansSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        } as LearningPlan));
+
+        console.log('[PLAN] Loaded', loadedPlans.length, 'plans:', loadedPlans.map(p => p.name));
 
         // If no plans exist, check if migration is needed
         if (loadedPlans.length === 0) {
-          console.log('[PLAN CONTEXT] No plans found, checking migration...');
+          console.log('[PLAN] No plans, checking migration...');
           const shouldMigrate = await needsMigration(user.uid);
           if (shouldMigrate) {
-            console.log('[PLAN CONTEXT] Migrating legacy data to plan structure...');
-            const migrationResult = await migrateUserToPlans(user.uid);
-            console.log('[PLAN CONTEXT] Migration result:', migrationResult);
-            
-            // Reload plans after migration
+            console.log('[PLAN] Migrating...');
+            await migrateUserToPlans(user.uid);
             const plansSnapshotAfter = await getDocs(plansRef);
             const plansAfterMigration: LearningPlan[] = plansSnapshotAfter.docs.map(doc => ({
               id: doc.id,
               ...doc.data()
             } as LearningPlan));
-            
-            console.log('[PLAN CONTEXT] Plans after migration:', plansAfterMigration);
+            console.log('[PLAN] After migration:', plansAfterMigration.length, 'plans');
             setPlans(plansAfterMigration);
             const active = plansAfterMigration.find(p => p.isActive) || plansAfterMigration[0] || null;
             setActivePlanState(active);
-            setLoading(false);
             return;
           }
         }
 
-        console.log('[PLAN CONTEXT] Setting plans state:', loadedPlans);
-        console.log('[PLAN CONTEXT] Plans array length:', loadedPlans.length);
         setPlans(loadedPlans);
-        
-        // Force a state update check
-        setTimeout(() => {
-          console.log('[PLAN CONTEXT] State check - plans count after setPlans:', plans.length);
-        }, 100);
-
-        // Find active plan
         const active = loadedPlans.find(p => p.isActive) || loadedPlans[0] || null;
-        console.log('[PLAN CONTEXT] Active plan found:', active ? { id: active.id, name: active.name } : 'null');
+        console.log('[PLAN] Active plan:', active?.name || 'none');
         setActivePlanState(active);
 
-        // If no active plan but plans exist, set first one as active
-        if (!active && loadedPlans.length > 0) {
-          console.log('[PLAN CONTEXT] No active plan found, setting first plan as active...');
-          try {
-            await setActivePlan(loadedPlans[0].id);
-            console.log('[PLAN CONTEXT] ✅ First plan set as active');
-          } catch (setActiveError) {
-            console.error('[PLAN CONTEXT] ❌ Error setting first plan as active:', setActiveError);
-          }
+        // If we had to use fallback (first plan), update Firebase in background
+        if (active && !loadedPlans.find(p => p.isActive) && loadedPlans.length > 0) {
+          const planRef = doc(db, 'users', user.uid, 'plans', active.id);
+          updateDoc(planRef, { isActive: true }).catch(err => {
+            console.warn('[PLAN CONTEXT] Failed to set isActive in Firebase:', err);
+          });
         }
       } catch (error: any) {
-        console.error('[PLAN CONTEXT] ===== ERROR loading plans =====');
-        console.error('[PLAN CONTEXT] Error details:', error);
-        console.error('[PLAN CONTEXT] Error name:', error?.name);
-        console.error('[PLAN CONTEXT] Error message:', error?.message);
-        console.error('[PLAN CONTEXT] Error code:', error?.code);
-        console.error('[PLAN CONTEXT] Error stack:', error?.stack);
-        console.error('[PLAN CONTEXT] ===== ERROR END =====');
-        // Don't clear plans on error - keep existing state
+        console.error('[PLAN] ERROR:', error?.message || error);
       } finally {
-        console.log('[PLAN CONTEXT] loadPlans completed, setting loading to false');
+        console.log('[PLAN] loadPlans done - setting loading false');
         setLoading(false);
+        clearTimeout(safetyTimeout);
       }
     };
 
+    console.log('[PLAN] Calling loadPlans...');
     loadPlans();
+
+    return () => clearTimeout(safetyTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid, authLoading]); // Depend on user.uid and authLoading
-  
-  // Prevent loadPlans from running when plans are updated locally
-  const isCreatingPlanRef = React.useRef(false);
-
   const createPlan = async (
-    sourceLanguage: string, 
-    targetLanguage: string, 
+    sourceLanguage: string,
+    targetLanguage: string,
     customName?: string
   ): Promise<LearningPlan> => {
-    console.log('[PLAN CONTEXT] createPlan called:', { sourceLanguage, targetLanguage, customName });
-    
     if (!user) {
-      console.error('[PLAN CONTEXT] No user found');
       throw new Error('User must be logged in');
     }
-    
-    // Set flag to prevent loadPlans from running
+
     isCreatingPlanRef.current = true;
-    console.log('[PLAN CONTEXT] Set isCreatingPlanRef to true');
 
     // Validate language pair
     if (!isValidLanguagePair(sourceLanguage, targetLanguage)) {
-      console.error('[PLAN CONTEXT] Invalid language pair');
       throw new Error('Invalid language pair');
     }
 
@@ -226,22 +172,22 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
       p => p.sourceLanguage === sourceLanguage && p.targetLanguage === targetLanguage
     );
     if (existingPlan) {
-      console.error('[PLAN CONTEXT] Plan already exists');
       throw new Error('Plan with this language pair already exists');
     }
 
-    // Generate plan name
+    // Generate client-side ID for instant response
+    const planId = `plan_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const planName = customName || generatePlanName(sourceLanguage, targetLanguage);
-    console.log('[PLAN CONTEXT] Generated plan name:', planName);
+    const isFirstPlan = plans.length === 0;
 
-    // Create plan document
-    const planData = {
+    const newPlan: LearningPlan = {
+      id: planId,
       userId: user.uid,
       sourceLanguage,
       targetLanguage,
       name: planName,
-      createdAt: serverTimestamp(),
-      isActive: plans.length === 0, // First plan is active by default
+      createdAt: Timestamp.now(),
+      isActive: isFirstPlan,
       progress: {
         wordsLearned: 0,
         currentLevel: 1,
@@ -249,202 +195,70 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
     };
 
-    console.log('[PLAN CONTEXT] Creating plan in Firestore...');
-    console.log('[PLAN CONTEXT] Plan data to save:', planData);
-    console.log('[PLAN CONTEXT] User UID:', user.uid);
-    
-    let planRef;
-    let planId: string | null = null;
-    
-    try {
-      const collectionRef = collection(db, 'users', user.uid, 'plans');
-      console.log('[PLAN CONTEXT] Collection ref created');
-      console.log('[PLAN CONTEXT] Calling addDoc (no timeout)...');
-      
-      // Simple addDoc without timeout - let Firestore handle it
-      planRef = await addDoc(collectionRef, planData);
-      console.log('[PLAN CONTEXT] ✅ addDoc completed!');
-      console.log('[PLAN CONTEXT] ✅ Plan created in Firestore with ID:', planRef.id);
-      planId = planRef.id;
-      
-      console.log('[PLAN CONTEXT] Plan ref path:', planRef?.path);
-    } catch (error: any) {
-      console.error('[PLAN CONTEXT] ❌ Error creating plan in Firestore:', error);
-      console.error('[PLAN CONTEXT] Error name:', error?.name);
-      console.error('[PLAN CONTEXT] Error message:', error?.message);
-      console.error('[PLAN CONTEXT] Error code:', error?.code);
-      isCreatingPlanRef.current = false;
-      throw error;
-    }
-    
-    if (!planId) {
-      console.error('[PLAN CONTEXT] ❌ planId is null');
-      isCreatingPlanRef.current = false;
-      throw new Error('Failed to create plan - no planId');
-    }
-
-    const newPlan: LearningPlan = {
-      id: planId,
-      ...planData,
-      createdAt: Timestamp.now(), // Fallback for immediate use
-    } as LearningPlan;
-
-    console.log('[PLAN CONTEXT] New plan object created:', newPlan);
-    console.log('[PLAN CONTEXT] Current plans array length:', plans.length);
-
-    // Update local state first (add new plan to plans array)
+    // OPTIMISTIC UI: Update local state immediately
     const updatedPlans = [...plans, newPlan];
-    console.log('[PLAN CONTEXT] Updated plans array length:', updatedPlans.length);
-    console.log('[PLAN CONTEXT] Calling setPlans with:', updatedPlans);
     setPlans(updatedPlans);
-    console.log('[PLAN CONTEXT] setPlans called');
 
-    // If this is the first plan or should be active, set it as active (async, don't block)
-    if (newPlan.isActive) {
-      console.log('[PLAN CONTEXT] Plan should be active, isActive:', newPlan.isActive);
-      console.log('[PLAN CONTEXT] Setting plan as active in local state...');
-      // Set local state immediately
+    if (isFirstPlan) {
       setActivePlanState(newPlan);
-      console.log('[PLAN CONTEXT] setActivePlanState called');
-      
-      setPlans(prev => {
-        console.log('[PLAN CONTEXT] setPlans callback - updating isActive flags');
-        return prev.map(p => ({ ...p, isActive: p.id === newPlan.id }));
-      });
-      
-      // Update Firestore in background (don't await - don't block plan creation)
-      console.log('[PLAN CONTEXT] Updating Firestore active state (background, non-blocking)...');
-      Promise.all(updatedPlans.map(plan => {
-        const planDocRef = doc(db, 'users', user.uid, 'plans', plan.id);
-        return updateDoc(planDocRef, {
-          isActive: plan.id === newPlan.id,
-        }).catch(error => {
-          console.error('[PLAN CONTEXT] Error setting active plan in Firestore:', error);
-          // Don't throw - plan is created, just active state update failed
-        });
-      })).then(() => {
-        console.log('[PLAN CONTEXT] Firestore active state update completed (background)');
-      });
-    } else {
-      console.log('[PLAN CONTEXT] Plan is not active, isActive:', newPlan.isActive);
     }
 
-    console.log('[PLAN CONTEXT] ✅ About to return newPlan:', newPlan);
-    console.log('[PLAN CONTEXT] ===== createPlan SUCCESS END =====');
-    
-    // Reset flag after a short delay to allow state updates
-    setTimeout(() => {
+    // Firebase operation in background (don't await)
+    const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
+    setDoc(planDocRef, {
+      userId: user.uid,
+      sourceLanguage,
+      targetLanguage,
+      name: planName,
+      createdAt: serverTimestamp(),
+      isActive: isFirstPlan,
+      progress: {
+        wordsLearned: 0,
+        currentLevel: 1,
+        totalWords: 0,
+      },
+    }).catch(err => {
+      console.error('[PLAN CONTEXT] Create plan failed:', err);
+    }).finally(() => {
       isCreatingPlanRef.current = false;
-      console.log('[PLAN CONTEXT] Reset isCreatingPlanRef to false');
-    }, 2000);
-    
-    console.log('[PLAN CONTEXT] Returning newPlan now...');
+    });
+
     return newPlan;
   };
 
   const deletePlan = async (planId: string): Promise<void> => {
-    console.log('[PLAN CONTEXT] ===== deletePlan START =====');
-    console.log('[PLAN CONTEXT] Plan ID to delete:', planId);
-    console.log('[PLAN CONTEXT] User UID:', user?.uid);
-    console.log('[PLAN CONTEXT] Current plans count:', plans.length);
-    console.log('[PLAN CONTEXT] Current active plan ID:', activePlan?.id);
-    
     if (!user) {
-      console.error('[PLAN CONTEXT] ❌ User not logged in');
       throw new Error('User must be logged in');
     }
 
-    try {
-      // Delete plan document
-      const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
-      console.log('[PLAN CONTEXT] Plan document path:', planDocRef.path);
-      console.log('[PLAN CONTEXT] Calling deleteDoc...');
-      
-      // Try deleteDoc with timeout
-      const deleteDocPromise = deleteDoc(planDocRef);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('deleteDoc took too long')), 5000)
-      );
-      
-      try {
-        await Promise.race([deleteDocPromise, timeoutPromise]);
-        console.log('[PLAN CONTEXT] ✅ deleteDoc completed successfully');
-      } catch (raceError: any) {
-        console.warn('[PLAN CONTEXT] ⚠️ deleteDoc race failed, but document may still be deleted:', raceError.message);
-        
-        // Verify deletion by trying to read the document
-        console.log('[PLAN CONTEXT] Verifying deletion by checking if document exists...');
-        try {
-          const docSnapshot = await getDoc(planDocRef);
-          if (docSnapshot.exists()) {
-            console.error('[PLAN CONTEXT] ❌ Document still exists after timeout');
-            throw new Error('Plan deletion timed out and document still exists');
-          } else {
-            console.log('[PLAN CONTEXT] ✅ Document verified as deleted (does not exist)');
-          }
-        } catch (verifyError: any) {
-          console.error('[PLAN CONTEXT] ❌ Error verifying deletion:', verifyError);
-          // If verification fails, assume deletion succeeded and continue
-          console.log('[PLAN CONTEXT] ⚠️ Continuing with deletion flow despite verification error');
-        }
-      }
+    // Calculate remaining plans
+    const remainingPlans = plans.filter(p => p.id !== planId);
+    const wasActive = activePlan?.id === planId;
 
-      // Calculate remaining plans first
-      const remainingPlans = plans.filter(p => p.id !== planId);
-      console.log('[PLAN CONTEXT] Remaining plans count:', remainingPlans.length);
-      console.log('[PLAN CONTEXT] Remaining plans:', remainingPlans.map(p => ({ id: p.id, name: p.name })));
-      
-      // Update local state immediately
-      console.log('[PLAN CONTEXT] Updating local state with remaining plans');
-      setPlans(remainingPlans);
+    // OPTIMISTIC UI: Update local state immediately
+    setPlans(remainingPlans);
 
-      // If deleted plan was active, set another plan as active
-      const wasActive = activePlan?.id === planId;
-      console.log('[PLAN CONTEXT] Was deleted plan active?', wasActive);
-      
-      if (wasActive && remainingPlans.length > 0) {
-        console.log('[PLAN CONTEXT] Deleted plan was active, setting first remaining plan as active');
-        // Update all remaining plans: set the first one as active, others as inactive
-        try {
-          const updates = remainingPlans.map(plan => {
-            const planRef = doc(db, 'users', user.uid, 'plans', plan.id);
-            const isActive = plan.id === remainingPlans[0].id;
-            console.log(`[PLAN CONTEXT] Updating plan ${plan.id} isActive to ${isActive}`);
-            return updateDoc(planRef, {
-              isActive: isActive,
-            });
-          });
+    if (wasActive && remainingPlans.length > 0) {
+      setActivePlanState(remainingPlans[0]);
+      setPlans(prev => prev.map(p => ({ ...p, isActive: p.id === remainingPlans[0].id })));
+    } else if (wasActive) {
+      setActivePlanState(null);
+    }
 
-          console.log('[PLAN CONTEXT] Waiting for all Firestore updates...');
-          await Promise.all(updates);
-          console.log('[PLAN CONTEXT] ✅ All Firestore updates completed');
+    // Firebase operations in background (don't await)
+    const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
+    deleteDoc(planDocRef).catch(err => {
+      console.error('[PLAN CONTEXT] Delete failed:', err);
+    });
 
-          // Update local state
-          console.log('[PLAN CONTEXT] Setting new active plan in local state:', remainingPlans[0].id);
-          setActivePlanState(remainingPlans[0]);
-          setPlans(prev => prev.map(p => ({ ...p, isActive: p.id === remainingPlans[0].id })));
-        } catch (error) {
-          console.error('[PLAN CONTEXT] ❌ Error setting active plan after delete:', error);
-          // Don't throw - plan is deleted, just active state update failed
-          setActivePlanState(remainingPlans[0]);
-        }
-      } else if (wasActive) {
-        console.log('[PLAN CONTEXT] Deleted plan was active, but no remaining plans. Setting activePlan to null');
-        setActivePlanState(null);
-      } else {
-        console.log('[PLAN CONTEXT] Deleted plan was not active, no need to change active plan');
-      }
-      
-      console.log('[PLAN CONTEXT] ===== deletePlan SUCCESS END =====');
-    } catch (error: any) {
-      console.error('[PLAN CONTEXT] ===== deletePlan ERROR =====');
-      console.error('[PLAN CONTEXT] Error details:', error);
-      console.error('[PLAN CONTEXT] Error name:', error?.name);
-      console.error('[PLAN CONTEXT] Error message:', error?.message);
-      console.error('[PLAN CONTEXT] Error code:', error?.code);
-      console.error('[PLAN CONTEXT] Error stack:', error?.stack);
-      console.error('[PLAN CONTEXT] ===== deletePlan ERROR END =====');
-      throw error;
+    // Update active state for remaining plans in background
+    if (wasActive && remainingPlans.length > 0) {
+      remainingPlans.forEach(plan => {
+        const planRef = doc(db, 'users', user.uid, 'plans', plan.id);
+        updateDoc(planRef, { isActive: plan.id === remainingPlans[0].id }).catch(err => {
+          console.error('[PLAN CONTEXT] Update active failed:', err);
+        });
+      });
     }
   };
 
@@ -492,13 +306,46 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const updatePlanProgress = (
+    planId: string,
+    progress: Partial<LearningPlan['progress']>
+  ): void => {
+    if (!user) return;
+
+    // Update local state immediately
+    const newPlans = plans.map(p =>
+      p.id === planId
+        ? { ...p, progress: { ...p.progress, ...progress } }
+        : p
+    );
+    setPlans(newPlans);
+
+    // Update active plan if it's the one being updated
+    if (activePlan?.id === planId) {
+      setActivePlanState(prev => prev ? { ...prev, progress: { ...prev.progress, ...progress } } : null);
+    }
+
+    // Sync to Firebase in background (fire and forget)
+    const planRef = doc(db, 'users', user.uid, 'plans', planId);
+    updateDoc(planRef, {
+      progress: { ...plans.find(p => p.id === planId)?.progress, ...progress }
+    }).catch(error => {
+      console.error('[PLAN CONTEXT] Error updating plan progress:', error);
+    });
+  };
+
+  // isReady is true when auth is loaded and (user has plans OR no user)
+  const isReady = !authLoading && !loading;
+
   const value: PlanContextType = {
     activePlan,
     plans,
     loading,
+    isReady,
     createPlan,
     deletePlan,
     setActivePlan,
+    updatePlanProgress,
     refreshPlans,
   };
 

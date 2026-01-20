@@ -2,7 +2,6 @@ import React, { useState, useCallback } from 'react';
 import { LayoutGrid, BookMarked, Languages, User, LogOut, LogIn, ChevronDown } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
-import { useLocalFirst } from '../../context/LocalFirstContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 // Prefetch functions for lazy-loaded pages
@@ -16,7 +15,6 @@ export const Navbar: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, loading } = useAuth();
-  const { clearData } = useLocalFirst();
   const [showUserMenu, setShowUserMenu] = useState(false);
 
   const navItems = [
@@ -33,7 +31,6 @@ export const Navbar: React.FC = () => {
 
   const handleLogout = async () => {
     try {
-      clearData();
       await logout();
       setShowUserMenu(false);
       navigate('/plans');

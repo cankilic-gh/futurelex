@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Word, LearningPlan } from '../../types';
-import { useLocalFirst } from '../../context/LocalFirstContext';
+import { usePlan } from '../../context/PlanContext';
 import { Volume2, RotateCw, BookmarkCheck, CheckCircle } from 'lucide-react';
 
 // Simple phonetic conversion helper
@@ -54,7 +54,7 @@ interface CardProps {
 
 export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted = false }) => {
   const [isFlipped, setIsFlipped] = useState(false);
-  const { activePlan } = useLocalFirst();
+  const { activePlan } = usePlan();
 
   // Reset flip state when word changes (next/prev card)
   useEffect(() => {

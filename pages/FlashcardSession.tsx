@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getWordPool, getAllAvailableWords } from '../services/data';
 import { getLanguageByCode } from '../services/languages';
-import { useLocalFirst } from '../context/LocalFirstContext';
+import { usePlan } from '../context/PlanContext';
 import { LocalStorage } from '../services/localStorage';
 // Firebase imports kept for now - will use local storage as primary
 import { db } from '../services/firebase';
@@ -12,12 +12,9 @@ import { GlassButton } from '../components/ui/GlassButton';
 import { Word } from '../types';
 import { ArrowLeft, ArrowRight, Bookmark, CheckCircle2, BookmarkCheck, CheckCircle, X, Database, Cloud, Sparkles, Layers } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useAuth } from '../context/AuthContext';
 
 const POOL_SIZE = 30;
-
-// DEVICE-SPECIFIC USER ID - Each device gets unique ID to prevent data mixing
-// This replaces the old 'local_user' which caused all guests to share the same Firebase path
-const getLocalUser = () => ({ uid: LocalStorage.getDeviceId() });
 
 // Cache configuration
 const CACHE_KEY_SAVED = 'futurelex_saved_words_cache';
@@ -145,10 +142,18 @@ export const FlashcardSession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const isReviewMode = searchParams.get('review') === 'true';
 
-  // LOCAL FIRST - Get activePlan first so we can initialize state from cache
-  const { activePlan, updatePlanProgress } = useLocalFirst();
-  // DEVICE-SPECIFIC: Each device gets unique user ID (prevents data mixing between guests)
-  const user = useMemo(() => getLocalUser(), []);
+  // Get activePlan from PlanContext (synced with Firebase)
+  const { activePlan, updatePlanProgress } = usePlan();
+  // Use real Firebase auth user - this ensures data persists across sessions/devices
+  const { user: authUser } = useAuth();
+  // Fall back to device ID for guests (not logged in), but prefer real user UID
+  const user = useMemo(() => {
+    if (authUser) {
+      return { uid: authUser.uid };
+    }
+    // Guest fallback - use device ID
+    return { uid: LocalStorage.getDeviceId() };
+  }, [authUser]);
 
   // CRITICAL FIX: Initialize state from cache to prevent data loss on refresh
   // This ensures saved/completed words are immediately available without waiting for Firebase
