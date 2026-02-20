@@ -107,13 +107,10 @@ export const PlanManager: React.FC = () => {
   };
 
   const handleSetActive = async (planId: string) => {
-    console.log('[PlanManager] Setting active plan:', planId);
     try {
       await setActivePlan(planId);
-      console.log('[PlanManager] Plan activated, navigating to /learn');
       navigate('/learn');
     } catch (err: any) {
-      console.error('[PlanManager] Failed to set active plan:', err);
       setError(err.message || 'Failed to activate plan');
     }
   };

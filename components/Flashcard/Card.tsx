@@ -74,7 +74,42 @@ export const Card: React.FC<CardProps> = ({ word, isSaved = false, isCompleted =
   const speak = (e: React.MouseEvent) => {
     e.stopPropagation();
     const utterance = new SpeechSynthesisUtterance(questionText);
-    utterance.lang = targetLang === 'en' ? 'en-US' : targetLang === 'tr' ? 'tr-TR' : targetLang;
+    const localeMap: Record<string, string> = {
+      'en': 'en-US',
+      'tr': 'tr-TR',
+      'de': 'de-DE',
+      'fr': 'fr-FR',
+      'it': 'it-IT',
+      'es': 'es-ES',
+      'pt': 'pt-PT',
+      'nl': 'nl-NL',
+      'ru': 'ru-RU',
+      'ja': 'ja-JP',
+      'ko': 'ko-KR',
+      'zh': 'zh-CN',
+      'ar': 'ar-SA',
+      'hi': 'hi-IN',
+      'pl': 'pl-PL',
+      'sv': 'sv-SE',
+      'no': 'nb-NO',
+      'da': 'da-DK',
+      'fi': 'fi-FI',
+      'cs': 'cs-CZ',
+      'el': 'el-GR',
+      'he': 'he-IL',
+      'th': 'th-TH',
+      'vi': 'vi-VN',
+      'id': 'id-ID',
+      'ms': 'ms-MY',
+      'uk': 'uk-UA',
+      'ro': 'ro-RO',
+      'hu': 'hu-HU',
+      'bg': 'bg-BG',
+      'sk': 'sk-SK',
+      'hr': 'hr-HR',
+      'ca': 'ca-ES',
+    };
+    utterance.lang = localeMap[targetLang] || targetLang;
     window.speechSynthesis.speak(utterance);
   };
 

@@ -20,22 +20,17 @@ const Auth = React.lazy(() => import('./pages/Auth').then(m => ({ default: m.Aut
 
 // Simple wrapper to check if user has plans
 const RequirePlan: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { activePlan, plans, loading, isReady } = usePlan();
-
-  console.log('[RequirePlan] State:', { loading, isReady, activePlan: activePlan?.name, plansCount: plans.length });
+  const { activePlan, loading } = usePlan();
 
   // Wait for plans to load
   if (loading) {
-    console.log('[RequirePlan] Still loading, returning null');
     return null;
   }
 
   if (!activePlan) {
-    console.log('[RequirePlan] No active plan, redirecting to /plans');
     return <Navigate to="/plans" replace />;
   }
 
-  console.log('[RequirePlan] Rendering children with plan:', activePlan.name);
   return <>{children}</>;
 };
 

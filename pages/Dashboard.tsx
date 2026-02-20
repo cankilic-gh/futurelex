@@ -21,8 +21,7 @@ function getCachedWordsForPlan(cacheKey: string): { words: UserSavedWord[], time
     if (!cached) return null;
     const parsed = JSON.parse(cached);
     return { words: parsed.words || [], timestamp: parsed.timestamp || 0 };
-  } catch (err) {
-    console.error('[CACHE] Error reading dashboard cache:', err);
+  } catch {
     return null;
   }
 }
@@ -34,8 +33,8 @@ function setCachedWordsForPlan(cacheKey: string, words: UserSavedWord[]): void {
       timestamp: Date.now()
     };
     localStorage.setItem(cacheKey, JSON.stringify(data));
-  } catch (err) {
-    console.error('[CACHE] Error writing dashboard cache:', err);
+  } catch {
+    // Silently fail
   }
 }
 
@@ -76,10 +75,6 @@ export const Dashboard: React.FC = () => {
       setSavedWords(cachedWords);
       setLoading(false); // Show immediately - don't wait for Firebase!
 
-      if (cached) {
-        console.log('[CACHE] Using cached dashboard words:', { count: cachedWords.length, planId: activePlan.id });
-      }
-
       // Fetch from Firebase in background (fire and forget)
       getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words')))
         .then(querySnapshot => {
@@ -89,15 +84,11 @@ export const Dashboard: React.FC = () => {
             ...doc.data()
           })) as UserSavedWord[];
 
-          console.log('[FETCH] Background sync completed:', { count: words.length, planId: activePlan.id });
-
-          // Update cache and state
           setCachedWordsForPlan(cacheKey, words);
           setSavedWords(words);
         })
-        .catch(err => {
-          console.error("[FETCH] Background sync failed:", err);
-          // Don't throw - UI is already showing
+        .catch(() => {
+          // Background sync failed - UI is already showing
         });
     };
 
@@ -113,8 +104,8 @@ export const Dashboard: React.FC = () => {
       // Update cache after removal
       const cacheKey = `${CACHE_KEY_DASHBOARD}_${activePlan.id}`;
       setCachedWordsForPlan(cacheKey, updatedWords);
-    } catch (err) {
-      console.error("Failed to remove word", err);
+    } catch {
+      // Failed to remove word
     }
   };
 

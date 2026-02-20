@@ -49,22 +49,17 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Load user's plans and active plan
   useEffect(() => {
-    console.log('[PLAN] useEffect - authLoading:', authLoading, 'user:', user?.email || 'none');
-
     // Safety timeout - ensure loading becomes false within 10 seconds
     const safetyTimeout = setTimeout(() => {
-      console.warn('[PLAN] Safety timeout triggered - forcing loading to false');
       setLoading(false);
     }, 10000);
 
     // Wait for auth to finish loading
     if (authLoading) {
-      console.log('[PLAN] Waiting for auth...');
       return () => clearTimeout(safetyTimeout);
     }
 
     if (!user) {
-      console.log('[PLAN] No user - clearing state');
       setPlans([]);
       setActivePlanState(null);
       setLoading(false);
@@ -73,17 +68,14 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const loadPlans = async () => {
-      console.log('[PLAN] loadPlans START for:', user.uid);
       try {
-        // Skip if we're currently creating a plan (inside try so finally still runs)
+        // Skip if we're currently creating a plan
         if (isCreatingPlanRef.current) {
-          console.log('[PLAN] Skipped - plan creation in progress');
           return;
         }
 
         // Load all plans for user - use server directly to avoid cache issues
         const plansRef = collection(db, 'users', user.uid, 'plans');
-        console.log('[PLAN] Fetching from Firebase server...');
 
         // Add timeout to Firebase call to catch hanging requests
         const timeoutPromise = new Promise((_, reject) =>
@@ -95,28 +87,21 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
           timeoutPromise
         ]) as any;
 
-        console.log('[PLAN] Firebase returned:', plansSnapshot.docs.length, 'plans');
-
-        const loadedPlans: LearningPlan[] = plansSnapshot.docs.map(doc => ({
+        const loadedPlans: LearningPlan[] = plansSnapshot.docs.map((doc: any) => ({
           id: doc.id,
           ...doc.data()
         } as LearningPlan));
 
-        console.log('[PLAN] Loaded', loadedPlans.length, 'plans:', loadedPlans.map(p => p.name));
-
         // If no plans exist, check if migration is needed
         if (loadedPlans.length === 0) {
-          console.log('[PLAN] No plans, checking migration...');
           const shouldMigrate = await needsMigration(user.uid);
           if (shouldMigrate) {
-            console.log('[PLAN] Migrating...');
             await migrateUserToPlans(user.uid);
             const plansSnapshotAfter = await getDocs(plansRef);
-            const plansAfterMigration: LearningPlan[] = plansSnapshotAfter.docs.map(doc => ({
+            const plansAfterMigration: LearningPlan[] = plansSnapshotAfter.docs.map((doc: any) => ({
               id: doc.id,
               ...doc.data()
             } as LearningPlan));
-            console.log('[PLAN] After migration:', plansAfterMigration.length, 'plans');
             setPlans(plansAfterMigration);
             const active = plansAfterMigration.find(p => p.isActive) || plansAfterMigration[0] || null;
             setActivePlanState(active);
@@ -126,31 +111,26 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setPlans(loadedPlans);
         const active = loadedPlans.find(p => p.isActive) || loadedPlans[0] || null;
-        console.log('[PLAN] Active plan:', active?.name || 'none');
         setActivePlanState(active);
 
         // If we had to use fallback (first plan), update Firebase in background
         if (active && !loadedPlans.find(p => p.isActive) && loadedPlans.length > 0) {
           const planRef = doc(db, 'users', user.uid, 'plans', active.id);
-          updateDoc(planRef, { isActive: true }).catch(err => {
-            console.warn('[PLAN CONTEXT] Failed to set isActive in Firebase:', err);
-          });
+          updateDoc(planRef, { isActive: true }).catch(() => {});
         }
-      } catch (error: any) {
-        console.error('[PLAN] ERROR:', error?.message || error);
+      } catch {
+        // Error loading plans
       } finally {
-        console.log('[PLAN] loadPlans done - setting loading false');
         setLoading(false);
         clearTimeout(safetyTimeout);
       }
     };
 
-    console.log('[PLAN] Calling loadPlans...');
     loadPlans();
 
     return () => clearTimeout(safetyTimeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.uid, authLoading]); // Depend on user.uid and authLoading
+  }, [user?.uid, authLoading]);
   const createPlan = async (
     sourceLanguage: string,
     targetLanguage: string,
@@ -217,9 +197,7 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentLevel: 1,
         totalWords: 0,
       },
-    }).catch(err => {
-      console.error('[PLAN CONTEXT] Create plan failed:', err);
-    }).finally(() => {
+    }).catch(() => {}).finally(() => {
       isCreatingPlanRef.current = false;
     });
 
@@ -247,17 +225,13 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Firebase operations in background (don't await)
     const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
-    deleteDoc(planDocRef).catch(err => {
-      console.error('[PLAN CONTEXT] Delete failed:', err);
-    });
+    deleteDoc(planDocRef).catch(() => {});
 
     // Update active state for remaining plans in background
     if (wasActive && remainingPlans.length > 0) {
       remainingPlans.forEach(plan => {
         const planRef = doc(db, 'users', user.uid, 'plans', plan.id);
-        updateDoc(planRef, { isActive: plan.id === remainingPlans[0].id }).catch(err => {
-          console.error('[PLAN CONTEXT] Update active failed:', err);
-        });
+        updateDoc(planRef, { isActive: plan.id === remainingPlans[0].id }).catch(() => {});
       });
     }
   };
@@ -281,7 +255,6 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActivePlanState(newActivePlan);
       setPlans(prev => prev.map(p => ({ ...p, isActive: p.id === planId })));
     } catch (error) {
-      console.error('Error setting active plan:', error);
       throw error;
     }
   };
@@ -301,8 +274,8 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const active = loadedPlans.find(p => p.isActive) || null;
       setActivePlanState(active);
-    } catch (error) {
-      console.error('Error refreshing plans:', error);
+    } catch {
+      // Error refreshing plans
     }
   };
 
@@ -329,9 +302,7 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const planRef = doc(db, 'users', user.uid, 'plans', planId);
     updateDoc(planRef, {
       progress: { ...plans.find(p => p.id === planId)?.progress, ...progress }
-    }).catch(error => {
-      console.error('[PLAN CONTEXT] Error updating plan progress:', error);
-    });
+    }).catch(() => {});
   };
 
   // isReady is true when auth is loaded and (user has plans OR no user)

@@ -4,7 +4,6 @@ import { getWordPool, getAllAvailableWords } from '../services/data';
 import { getLanguageByCode } from '../services/languages';
 import { usePlan } from '../context/PlanContext';
 import { LocalStorage } from '../services/localStorage';
-// Firebase imports kept for now - will use local storage as primary
 import { db } from '../services/firebase';
 import { doc, setDoc, deleteDoc, getDocs, collection, query, serverTimestamp } from 'firebase/firestore';
 import { Card } from '../components/Flashcard/Card';
@@ -16,21 +15,18 @@ import { useAuth } from '../context/AuthContext';
 
 const POOL_SIZE = 30;
 
-// Cache configuration
 const CACHE_KEY_SAVED = 'futurelex_saved_words_cache';
 const CACHE_KEY_COMPLETED = 'futurelex_completed_words_cache';
-const CACHE_KEY_DASHBOARD = 'futurelex_dashboard_words_cache'; // Same key as Dashboard.tsx
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_KEY_DASHBOARD = 'futurelex_dashboard_words_cache';
+const CACHE_TTL = 5 * 60 * 1000;
 
-// Cache utility functions
 function getCachedWordIds(key: string): { ids: string[], timestamp: number } | null {
   try {
     const cached = localStorage.getItem(key);
     if (!cached) return null;
     const parsed = JSON.parse(cached);
     return { ids: parsed.ids || [], timestamp: parsed.timestamp || 0 };
-  } catch (err) {
-    console.error(`[CACHE] Error reading cache for ${key}:`, err);
+  } catch {
     return null;
   }
 }
@@ -42,8 +38,8 @@ function setCachedWordIds(key: string, ids: string[]): void {
       timestamp: Date.now()
     };
     localStorage.setItem(key, JSON.stringify(data));
-  } catch (err) {
-    console.error(`[CACHE] Error writing cache for ${key}:`, err);
+  } catch {
+    // Silently fail
   }
 }
 
@@ -51,7 +47,6 @@ function isCacheValid(timestamp: number): boolean {
   return Date.now() - timestamp < CACHE_TTL;
 }
 
-// Dashboard cache functions (stores full word objects, same format as Dashboard.tsx)
 interface DashboardWord {
   id: string;
   wordId?: string;
@@ -75,8 +70,7 @@ function getDashboardCache(planId: string): { words: DashboardWord[], timestamp:
     if (!cached) return null;
     const parsed = JSON.parse(cached);
     return { words: parsed.words || [], timestamp: parsed.timestamp || 0 };
-  } catch (err) {
-    console.error('[CACHE] Error reading dashboard cache:', err);
+  } catch {
     return null;
   }
 }
@@ -89,9 +83,8 @@ function setDashboardCache(planId: string, words: DashboardWord[]): void {
       timestamp: Date.now()
     };
     localStorage.setItem(cacheKey, JSON.stringify(data));
-    console.log('[CACHE] Dashboard cache updated:', { planId, count: words.length });
-  } catch (err) {
-    console.error('[CACHE] Error writing dashboard cache:', err);
+  } catch {
+    // Silently fail
   }
 }
 
@@ -99,14 +92,11 @@ function addWordToDashboardCache(planId: string, word: Word, activePlan: any): v
   const cached = getDashboardCache(planId);
   const existingWords = cached?.words || [];
 
-  // Check if word already exists
   const exists = existingWords.some(w => w.id === word.id || w.wordId === word.id);
   if (exists) {
-    console.log('[CACHE] Word already in dashboard cache:', word.id);
     return;
   }
 
-  // Create dashboard word object
   const dashboardWord: DashboardWord = {
     id: word.id,
     wordId: word.id,
@@ -142,32 +132,24 @@ export const FlashcardSession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const isReviewMode = searchParams.get('review') === 'true';
 
-  // Get activePlan from PlanContext (synced with Firebase)
   const { activePlan, updatePlanProgress } = usePlan();
-  // Use real Firebase auth user - this ensures data persists across sessions/devices
   const { user: authUser } = useAuth();
-  // Fall back to device ID for guests (not logged in), but prefer real user UID
   const user = useMemo(() => {
     if (authUser) {
       return { uid: authUser.uid };
     }
-    // Guest fallback - use device ID
     return { uid: LocalStorage.getDeviceId() };
   }, [authUser]);
 
-  // CRITICAL FIX: Initialize state from cache to prevent data loss on refresh
-  // This ensures saved/completed words are immediately available without waiting for Firebase
   const [savedWordIds, setSavedWordIds] = useState<string[]>(() => {
     if (!activePlan) return [];
     const cached = getCachedWordIds(`${CACHE_KEY_SAVED}_${activePlan.id}`);
-    console.log('[INIT] Loaded savedWordIds from cache:', cached?.ids?.length || 0);
     return cached?.ids || [];
   });
 
   const [completedWordIds, setCompletedWordIds] = useState<string[]>(() => {
     if (!activePlan) return [];
     const cached = getCachedWordIds(`${CACHE_KEY_COMPLETED}_${activePlan.id}`);
-    console.log('[INIT] Loaded completedWordIds from cache:', cached?.ids?.length || 0);
     return cached?.ids || [];
   });
 
@@ -179,7 +161,6 @@ export const FlashcardSession: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadingStage, setLoadingStage] = useState<'init' | 'cache' | 'firebase' | 'pool' | 'done'>('init');
 
-  // CRITICAL: Reload from cache when activePlan changes (useState initializer only runs once)
   useEffect(() => {
     if (!activePlan) return;
 
@@ -188,15 +169,12 @@ export const FlashcardSession: React.FC = () => {
 
     if (cachedSaved?.ids) {
       setSavedWordIds(cachedSaved.ids);
-      console.log('[PLAN_CHANGE] Reloaded savedWordIds from cache:', cachedSaved.ids.length);
     }
     if (cachedCompleted?.ids) {
       setCompletedWordIds(cachedCompleted.ids);
-      console.log('[PLAN_CHANGE] Reloaded completedWordIds from cache:', cachedCompleted.ids.length);
     }
   }, [activePlan?.id]);
 
-  // Fetch saved and completed words, and initialize word pool
   useEffect(() => {
     if (!user || !activePlan) {
       setIsLoading(false);
@@ -206,7 +184,6 @@ export const FlashcardSession: React.FC = () => {
     const fetchUserWords = async () => {
       setLoadingStage('init');
       try {
-        // In review mode, load words from sessionStorage first
         if (isReviewMode) {
           const reviewWordsStr = sessionStorage.getItem('reviewWords');
           if (reviewWordsStr) {
@@ -215,42 +192,31 @@ export const FlashcardSession: React.FC = () => {
               if (reviewWords.length > 0) {
                 setWords(reviewWords);
                 setIsLoading(false);
-                // Clear sessionStorage after loading
                 sessionStorage.removeItem('reviewWords');
-                return; // Early return for review mode
+                return;
               }
-            } catch (err) {
-              console.error("Error parsing review words", err);
+            } catch {
+              // Continue with normal loading
             }
           }
-          // If no review words, fall through to normal loading
         }
 
-        // PROGRESSIVE LOADING: Load from cache first for instant display (plan-specific)
         setLoadingStage('cache');
         const planCacheKeySaved = `${CACHE_KEY_SAVED}_${activePlan.id}`;
         const planCacheKeyCompleted = `${CACHE_KEY_COMPLETED}_${activePlan.id}`;
         const cachedSaved = getCachedWordIds(planCacheKeySaved);
         const cachedCompleted = getCachedWordIds(planCacheKeyCompleted);
-        
+
         let savedIds: string[] = [];
         let completedIds: string[] = [];
-        let useCache = false;
 
-        // Use cache if valid
         if (cachedSaved && isCacheValid(cachedSaved.timestamp)) {
           savedIds = cachedSaved.ids;
-          useCache = true;
-          console.log("[CACHE] Using cached saved words:", { count: savedIds.length });
         }
         if (cachedCompleted && isCacheValid(cachedCompleted.timestamp)) {
           completedIds = cachedCompleted.ids;
-          useCache = true;
-          console.log("[CACHE] Using cached completed words:", { count: completedIds.length });
         }
 
-        // INSTANT LOADING: Show cards immediately, don't wait for Firebase
-        // Use cache if available (even expired), otherwise use empty set
         setSavedWordIds(savedIds);
         setCompletedWordIds(completedIds);
 
@@ -263,10 +229,9 @@ export const FlashcardSession: React.FC = () => {
             POOL_SIZE
           );
           setWords(pool);
-          setIsLoading(false); // Show words immediately - don't wait for Firebase!
+          setIsLoading(false);
         }
 
-        // Fetch from Firebase in background (fire and forget - don't block UI)
         setLoadingStage('firebase');
         Promise.all([
           getDocs(query(collection(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words'))),
@@ -288,17 +253,12 @@ export const FlashcardSession: React.FC = () => {
             }
           });
 
-          console.log("[FETCH] Background sync completed:", { saved: freshSavedIds.length, completed: freshCompletedIds.length });
-
-          // Update cache
           setCachedWordIds(planCacheKeySaved, freshSavedIds);
           setCachedWordIds(planCacheKeyCompleted, freshCompletedIds);
 
-          // Update state silently in background
           setSavedWordIds(freshSavedIds);
           setCompletedWordIds(freshCompletedIds);
 
-          // Only update word pool if completed IDs changed significantly
           if (!isReviewMode && freshCompletedIds.length !== completedIds.length) {
             const freshCompletedIdsSet = new Set(freshCompletedIds);
             const pool = getWordPool(
@@ -309,13 +269,10 @@ export const FlashcardSession: React.FC = () => {
             );
             setWords(pool);
           }
-        }).catch(err => {
-          console.error("[FETCH] Background sync failed:", err);
-          // Don't throw - UI is already showing, just log the error
+        }).catch(() => {
+          // Background sync failed - UI is already showing
         });
-      } catch (error) {
-        console.error("Error fetching user words", error);
-        // Fallback: load words even if fetch fails (plan-specific)
+      } catch {
         if (!isReviewMode && activePlan) {
           const pool = getWordPool(
             activePlan.sourceLanguage,
@@ -334,11 +291,9 @@ export const FlashcardSession: React.FC = () => {
     fetchUserWords();
   }, [user?.uid, activePlan?.id, isReviewMode]);
 
-  // Refill pool when it gets low (plan-specific)
   const refillPool = (currentWords: Word[], completedIds: string[]) => {
     if (!activePlan) return currentWords;
-    
-    // Convert Array to Set for getAllAvailableWords (it expects Set)
+
     const completedIdsSet = new Set(completedIds);
     const currentWordIds = new Set(currentWords.map(w => w.id));
     const availableWords = getAllAvailableWords(
@@ -346,57 +301,35 @@ export const FlashcardSession: React.FC = () => {
       activePlan.targetLanguage,
       completedIdsSet
     );
-    
-    // Get words not in current pool and not completed
+
     const newWords = availableWords.filter(w => !currentWordIds.has(w.id));
-    
-    // Shuffle and add to pool
+
     const shuffled = [...newWords].sort(() => Math.random() - 0.5);
     const needed = POOL_SIZE - currentWords.length;
-    
+
     if (needed > 0 && shuffled.length > 0) {
       const toAdd = shuffled.slice(0, Math.min(needed, shuffled.length));
       return [...currentWords, ...toAdd];
     }
-    
+
     return currentWords;
   };
 
   const paginate = async (newDirection: number) => {
-    console.log("[PAGINATE] ===== FUNCTION CALLED =====", { 
-      direction: newDirection, 
-      wordsLength: words.length, 
-      currentIndex,
-      currentWordId: currentWord?.id 
-    });
-    
     if (words.length === 0) {
-      console.log("[PAGINATE] Blocked: words.length is 0");
       return;
     }
-    
+
     if (!currentWord) {
-      console.log("[PAGINATE] Blocked: no currentWord");
       return;
     }
-    
-    // Reset any stuck loading states first
+
     setIsSaving(false);
     setIsCompleting(false);
-    
-    // Save current word's state if it's saved or completed (async, don't block)
+
     const isCurrentlySaved = savedWordIds.includes(currentWord.id);
     const isCurrentlyCompleted = completedWordIds.includes(currentWord.id);
-    
-    console.log("[PAGINATE] Current word state:", {
-      wordId: currentWord.id,
-      isCurrentlySaved,
-      isCurrentlyCompleted,
-      savedSize: savedWordIds.length,
-      completedSize: completedWordIds.length
-    });
-    
-    // Save to Firestore in background (don't await) - plan-specific
+
     if (isCurrentlyCompleted && user && activePlan) {
       const completedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words', currentWord.id);
       setDoc(completedWordRef, {
@@ -406,13 +339,10 @@ export const FlashcardSession: React.FC = () => {
         targetText: currentWord.targetText || currentWord.turkish || '',
         sourceLanguage: activePlan.sourceLanguage,
         targetLanguage: activePlan.targetLanguage,
-        // Legacy fields for backward compatibility
         english: currentWord.english || currentWord.sourceText,
         turkish: currentWord.turkish || currentWord.targetText,
         completedAt: serverTimestamp()
-      }, { merge: true }).catch(err => {
-        console.error("[PAGINATE] Error saving completed word:", err);
-      });
+      }, { merge: true }).catch(() => {});
     } else if (isCurrentlySaved && user && activePlan) {
       const savedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', currentWord.id);
       const wordData: any = {
@@ -426,35 +356,22 @@ export const FlashcardSession: React.FC = () => {
         type: currentWord.type || 'noun',
         level: currentWord.level || 1,
         savedAt: serverTimestamp(),
-        // Legacy fields for backward compatibility
         english: currentWord.english || currentWord.sourceText,
         turkish: currentWord.turkish || currentWord.targetText,
       };
       if (currentWord.pronunciation) {
         wordData.pronunciation = currentWord.pronunciation;
       }
-      setDoc(savedWordRef, wordData, { merge: true }).catch(err => {
-        console.error("[PAGINATE] Error saving saved word:", err);
-      });
+      setDoc(savedWordRef, wordData, { merge: true }).catch(() => {});
     }
-    
-    // Calculate next index
+
     let nextIndex = currentIndex + newDirection;
     if (nextIndex < 0) nextIndex = words.length - 1;
     if (nextIndex >= words.length) nextIndex = 0;
-    
-    console.log("[PAGINATE] Calculated nextIndex:", { 
-      currentIndex, 
-      newDirection, 
-      nextIndex,
-      nextWordId: words[nextIndex]?.id 
-    });
-    
-    // Remove completed word from pool if needed
+
     if (isCurrentlyCompleted) {
       const filteredWords = words.filter(w => w.id !== currentWord.id);
 
-      // Adjust index for the removed word
       const adjustedIndex = filteredWords.length > 0
         ? Math.max(0, Math.min(nextIndex > currentIndex ? nextIndex - 1 : nextIndex, filteredWords.length - 1))
         : 0;
@@ -462,8 +379,6 @@ export const FlashcardSession: React.FC = () => {
       setWords(filteredWords);
       setCurrentIndex(adjustedIndex);
 
-      // Refill pool if needed (sync, no setTimeout)
-      // Include current word in completed list to ensure it's not re-added
       if (!isReviewMode && filteredWords.length < 15) {
         const allCompletedIds = [...completedWordIds, currentWord.id];
         const refilledWords = refillPool(filteredWords, allCompletedIds);
@@ -472,150 +387,63 @@ export const FlashcardSession: React.FC = () => {
         }
       }
     } else {
-      // Normal navigation - just update index
       setCurrentIndex(nextIndex);
     }
   };
 
   const toggleSaveWord = async () => {
-    console.log("[TOGGLE SAVE] ===== FUNCTION CALLED =====");
-    console.log("[TOGGLE SAVE] Pre-check:", { user: !!user, currentWord: !!currentWord, activePlan: !!activePlan, isSaving, isCompleting });
-    console.log("[TOGGLE SAVE] savedWordIds state:", savedWordIds);
-    console.log("[TOGGLE SAVE] completedWordIds state:", completedWordIds);
-    
     if (!user || !currentWord || !activePlan || isSaving || isCompleting) {
-      console.log("[TOGGLE SAVE] Blocked:", { user: !!user, currentWord: !!currentWord, activePlan: !!activePlan, isSaving, isCompleting });
       return;
     }
-    
-    console.log("[TOGGLE SAVE] Pre-check passed, continuing...");
-    
+
     const word = currentWord;
     const isCurrentlySaved = savedWordIds.includes(word.id);
-    console.log("[TOGGLE SAVE] Start:", { wordId: word.id, isCurrentlySaved, savedSize: savedWordIds.length, completedSize: completedWordIds.length });
-    
-    // Plan-specific collection paths
+
     const wordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', word.id);
     const completedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words', word.id);
-    
-    console.log("[TOGGLE SAVE] About to set isSaving to true");
+
     setIsSaving(true);
-    console.log("[TOGGLE SAVE] isSaving set to true");
-    
-    // Reset loading state - call immediately after state update, not after Firestore
-    // This allows user to click again quickly
+
     const resetLoading = () => {
-      console.log("[TOGGLE SAVE] Resetting isSaving to false");
       setIsSaving(false);
-      console.log("[TOGGLE SAVE] isSaving reset complete");
     };
-    
-    console.log("[TOGGLE SAVE] Entering try block, isCurrentlySaved:", isCurrentlySaved);
+
     try {
       if (isCurrentlySaved) {
-        // Remove from saved (toggle off)
-        console.log("[TOGGLE SAVE] BRANCH: Removing from saved");
-        console.log("[TOGGLE SAVE] Current savedWordIds before remove:", savedWordIds);
-        // Update state first
-        setSavedWordIds(prev => {
-          console.log("[TOGGLE SAVE] ===== INSIDE setSavedWordIds callback (REMOVE) =====");
-          console.log("[TOGGLE SAVE] prev array:", prev);
-          console.log("[TOGGLE SAVE] word.id to remove:", word.id);
-          const newArray = prev.filter(id => id !== word.id);
-          console.log("[TOGGLE SAVE] ===== State updated - removed =====");
-          console.log("[TOGGLE SAVE] prevSize:", prev.length, "newSize:", newArray.length);
-          console.log("[TOGGLE SAVE] prevArray:", prev);
-          console.log("[TOGGLE SAVE] newArray:", newArray);
-          console.log("[TOGGLE SAVE] ===== END State update (REMOVE) =====");
-          return newArray;
-        });
+        setSavedWordIds(prev => prev.filter(id => id !== word.id));
 
-        // CRITICAL: Also remove from Dashboard cache (sync immediately)
         removeWordFromDashboardCache(activePlan.id, word.id);
 
-        // Reset loading immediately after state update (optimistic UI)
         resetLoading();
-        
-        // Firestore delete (async, don't await)
-        deleteDoc(wordRef).then(() => {
-          console.log("[TOGGLE SAVE] Firestore deleteDoc successful");
-        }).catch(err => {
-          console.error("[TOGGLE SAVE] Firestore deleteDoc failed:", err);
-          // Rollback state on error
+
+        deleteDoc(wordRef).catch(() => {
           setSavedWordIds(prev => {
             if (!prev.includes(word.id)) {
               return [...prev, word.id];
             }
-            console.log("[TOGGLE SAVE] State rolled back due to Firestore error");
             return prev;
           });
         });
       } else {
-        // Update state FIRST (optimistic update) - this ensures UI updates immediately
-        console.log("[TOGGLE SAVE] BRANCH: Adding to saved (ELSE BLOCK)");
-        console.log("[TOGGLE SAVE] Updating state FIRST (optimistic), current savedWordIds:", savedWordIds);
-        console.log("[TOGGLE SAVE] About to call setSavedWordIds with word.id:", word.id);
-        
-        // CRITICAL: Force state update by creating completely new Array
-        console.log("[TOGGLE SAVE] BEFORE setSavedWordIds, current savedWordIds:", savedWordIds, "word.id:", word.id);
-        console.log("[TOGGLE SAVE] Checking if word.id is already in savedWordIds:", savedWordIds.includes(word.id));
-        
-        // CRITICAL: Use functional update to ensure we get the latest state
-        // React state updates are batched, so we must use functional updates
-        console.log("[TOGGLE SAVE] About to call setSavedWordIds with functional update...");
-        console.log("[TOGGLE SAVE] Current savedWordIds before setSavedWordIds:", savedWordIds);
-        console.log("[TOGGLE SAVE] Word.id to add:", word.id);
-        
-        // Use functional update - this ensures we get the latest state
         setSavedWordIds(prev => {
-          console.log("[TOGGLE SAVE] ===== INSIDE setSavedWordIds callback =====");
-          console.log("[TOGGLE SAVE] prev array received:", prev);
-          console.log("[TOGGLE SAVE] prev array type:", typeof prev, Array.isArray(prev));
-          console.log("[TOGGLE SAVE] prev array length:", prev?.length);
-          console.log("[TOGGLE SAVE] word.id to add:", word.id);
-
           if (!Array.isArray(prev)) {
-            console.error("[TOGGLE SAVE] ERROR: prev is not an array!", prev);
-            return [word.id]; // Fallback
+            return [word.id];
           }
 
-          const alreadyIncluded = prev.includes(word.id);
-          console.log("[TOGGLE SAVE] Word already in saved?", alreadyIncluded);
-
-          if (alreadyIncluded) {
-            console.log("[TOGGLE SAVE] Word already in saved - returning same array");
+          if (prev.includes(word.id)) {
             return prev;
           }
 
-          const newArray = [...prev, word.id];
-          console.log("[TOGGLE SAVE] ===== State updated - added (optimistic) =====");
-          console.log("[TOGGLE SAVE] prevSize:", prev.length, "newSize:", newArray.length);
-          console.log("[TOGGLE SAVE] prevArray:", JSON.stringify(prev));
-          console.log("[TOGGLE SAVE] newArray:", JSON.stringify(newArray));
-          console.log("[TOGGLE SAVE] ===== END State update =====");
-          return newArray;
+          return [...prev, word.id];
         });
 
-        // CRITICAL: Also add to Dashboard cache (sync immediately with full word data)
         addWordToDashboardCache(activePlan.id, word, activePlan);
 
-        console.log("[TOGGLE SAVE] setSavedWordIds called, should trigger re-render");
-        
-        // If word is completed, remove it from completed first (mutual exclusivity)
         if (completedWordIds.includes(word.id)) {
-          console.log("[TOGGLE SAVE] Removing from completed (mutual exclusivity)");
-          setCompletedWordIds(prev => {
-            const newArray = prev.filter(id => id !== word.id);
-            console.log("[TOGGLE SAVE] Completed state updated - removed:", { newSize: newArray.length, prevSize: prev.length });
-            return newArray;
-          });
-          // Firestore delete (async, don't await - fire and forget)
-          deleteDoc(completedWordRef).catch(err => {
-            console.error("[TOGGLE SAVE] Failed to delete from completed in Firestore:", err);
-          });
+          setCompletedWordIds(prev => prev.filter(id => id !== word.id));
+          deleteDoc(completedWordRef).catch(() => {});
         }
-        
-        // Add to saved - plan-specific with new structure
+
         const wordData: any = {
           wordId: word.id,
           planId: activePlan.id,
@@ -627,91 +455,49 @@ export const FlashcardSession: React.FC = () => {
           type: word.type || 'noun',
           level: word.level || 1,
           savedAt: serverTimestamp(),
-          // Legacy fields for backward compatibility
           english: word.english || word.sourceText,
           turkish: word.turkish || word.targetText,
         };
-        
-        // Only add pronunciation if it's defined
+
         if (word.pronunciation) {
           wordData.pronunciation = word.pronunciation;
         }
-        
-        // Reset loading immediately after state update (optimistic UI)
+
         resetLoading();
-        
-        console.log("[TOGGLE SAVE] Saving to Firestore, wordData:", wordData);
-        // Firestore save (async, don't await - fire and forget for better UX)
+
         setDoc(wordRef, wordData)
-          .then(() => {
-            console.log("[TOGGLE SAVE] Firestore setDoc successful");
-          })
-          .catch(firestoreError => {
-            console.error("[TOGGLE SAVE] Firestore setDoc failed:", firestoreError);
-            // Rollback state on error
-            setSavedWordIds(prev => {
-              const newArray = prev.filter(id => id !== word.id);
-              console.log("[TOGGLE SAVE] State rolled back due to Firestore error");
-              return newArray;
-            });
+          .catch(() => {
+            setSavedWordIds(prev => prev.filter(id => id !== word.id));
           });
       }
-    } catch (error) {
-      console.error("[TOGGLE SAVE] Error:", error);
-      console.error("[TOGGLE SAVE] Error details:", {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined
-      });
+    } catch {
       resetLoading();
     }
   };
 
   const toggleCompleteWord = async () => {
     if (!user || !currentWord || !activePlan || words.length === 0 || isSaving || isCompleting) {
-      console.log("[TOGGLE COMPLETE] Blocked:", { user: !!user, currentWord: !!currentWord, activePlan: !!activePlan, wordsLength: words.length, isSaving, isCompleting });
       return;
     }
-    
+
     const word = currentWord;
     const isCurrentlyCompleted = completedWordIds.includes(word.id);
-    console.log("[TOGGLE COMPLETE] Start:", { wordId: word.id, isCurrentlyCompleted, savedSize: savedWordIds.length, completedSize: completedWordIds.length });
-    
-    // Plan-specific collection paths
+
     const wordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'completed_words', word.id);
     const savedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', word.id);
-    
+
     setIsCompleting(true);
-    
-    // Reset loading state - call immediately after state update, not after Firestore
-    // This allows user to click again quickly
+
     const resetLoading = () => {
-      console.log("[TOGGLE COMPLETE] Resetting isCompleting to false");
       setIsCompleting(false);
-      console.log("[TOGGLE COMPLETE] isCompleting reset complete");
     };
-    
+
     try {
       if (isCurrentlyCompleted) {
-        console.log("[TOGGLE COMPLETE] Removing from completed");
-        console.log("[TOGGLE COMPLETE] Current completedWordIds before remove:", completedWordIds);
-        // Update state first
-        setCompletedWordIds(prev => {
-          console.log("[TOGGLE COMPLETE] ===== INSIDE setCompletedWordIds callback (REMOVE) =====");
-          console.log("[TOGGLE COMPLETE] prev array:", prev);
-          console.log("[TOGGLE COMPLETE] word.id to remove:", word.id);
-          const newArray = prev.filter(id => id !== word.id);
-          console.log("[TOGGLE COMPLETE] ===== State updated - removed =====");
-          console.log("[TOGGLE COMPLETE] prevSize:", prev.length, "newSize:", newArray.length);
-          console.log("[TOGGLE COMPLETE] prevArray:", prev);
-          console.log("[TOGGLE COMPLETE] newArray:", newArray);
-          console.log("[TOGGLE COMPLETE] ===== END State update (REMOVE) =====");
-          return newArray;
-        });
-        
-        // Reset loading immediately after state update (optimistic UI)
+        setCompletedWordIds(prev => prev.filter(id => id !== word.id));
+
         resetLoading();
-        
-        // Add back to pool if not already there
+
         setWords(prev => {
           const isInPool = prev.some(w => w.id === word.id);
           if (!isInPool) {
@@ -719,48 +505,29 @@ export const FlashcardSession: React.FC = () => {
           }
           return prev;
         });
-        
-        // Firestore delete (async, don't await)
-        deleteDoc(wordRef).then(() => {
-          console.log("[TOGGLE COMPLETE] Firestore deleteDoc successful");
-        }).catch(err => {
-          console.error("[TOGGLE COMPLETE] Firestore deleteDoc failed:", err);
-          // Rollback state on error
+
+        deleteDoc(wordRef).catch(() => {
           setCompletedWordIds(prev => {
             if (!prev.includes(word.id)) {
               return [...prev, word.id];
             }
-            console.log("[TOGGLE COMPLETE] State rolled back due to Firestore error");
             return prev;
           });
         });
       } else {
-        // Update state FIRST (optimistic update)
         const newCompletedIds = [...completedWordIds, word.id];
         setCompletedWordIds(newCompletedIds);
 
-        // Update plan progress
         if (activePlan) {
           updatePlanProgress(activePlan.id, { wordsLearned: newCompletedIds.length });
         }
-        
-        // If word is saved, remove it from saved first (mutual exclusivity)
+
         if (savedWordIds.includes(word.id)) {
-          console.log("[TOGGLE COMPLETE] Removing from saved (mutual exclusivity)");
-          setSavedWordIds(prev => {
-            const newArray = prev.filter(id => id !== word.id);
-            console.log("[TOGGLE COMPLETE] Saved state updated - removed:", { newSize: newArray.length, prevSize: prev.length });
-            return newArray;
-          });
-          // CRITICAL: Also remove from Dashboard cache (sync immediately)
+          setSavedWordIds(prev => prev.filter(id => id !== word.id));
           removeWordFromDashboardCache(activePlan.id, word.id);
-          // Firestore delete (async, don't await - fire and forget)
-          deleteDoc(savedWordRef).catch(err => {
-            console.error("[TOGGLE COMPLETE] Failed to delete from saved in Firestore:", err);
-          });
+          deleteDoc(savedWordRef).catch(() => {});
         }
-        
-        // Mark as completed - plan-specific with new structure
+
         const completedData = {
           wordId: word.id,
           planId: activePlan.id,
@@ -769,114 +536,45 @@ export const FlashcardSession: React.FC = () => {
           sourceLanguage: activePlan.sourceLanguage,
           targetLanguage: activePlan.targetLanguage,
           completedAt: serverTimestamp(),
-          // Legacy fields for backward compatibility
           english: word.english || word.sourceText,
           turkish: word.turkish || word.targetText,
         };
-        // Reset loading immediately after state update (optimistic UI)
         resetLoading();
-        
-        console.log("[TOGGLE COMPLETE] Saving to Firestore, completedData:", completedData);
-        // Firestore save (async, don't await - fire and forget for better UX)
+
         setDoc(wordRef, completedData)
-          .then(() => {
-            console.log("[TOGGLE COMPLETE] Firestore setDoc successful");
-          })
-          .catch(firestoreError => {
-            console.error("[TOGGLE COMPLETE] Firestore setDoc failed:", firestoreError);
-            // Rollback state on error
-            setCompletedWordIds(prev => {
-              const newArray = prev.filter(id => id !== word.id);
-              console.log("[TOGGLE COMPLETE] State rolled back due to Firestore error");
-              return newArray;
-            });
+          .catch(() => {
+            setCompletedWordIds(prev => prev.filter(id => id !== word.id));
           });
-        
-        // Don't remove from pool immediately - allow toggle until next/prev
-        // The word will be removed when user navigates away via paginate()
       }
-    } catch (error) {
-      console.error("[TOGGLE COMPLETE] Error:", error);
+    } catch {
       resetLoading();
     }
   };
 
-  // Ensure currentIndex is valid - CRITICAL: Clamp index to valid range
-  const validIndex = words.length > 0 
-    ? Math.max(0, Math.min(currentIndex, words.length - 1)) 
+  const validIndex = words.length > 0
+    ? Math.max(0, Math.min(currentIndex, words.length - 1))
     : 0;
-  const currentWord = words.length > 0 && validIndex >= 0 && validIndex < words.length 
-    ? words[validIndex] 
+  const currentWord = words.length > 0 && validIndex >= 0 && validIndex < words.length
+    ? words[validIndex]
     : null;
-  
-  // Sync currentIndex if it's out of bounds (this ensures index is always valid)
+
   useEffect(() => {
     if (words.length > 0 && (currentIndex < 0 || currentIndex >= words.length)) {
       const newIndex = Math.max(0, Math.min(currentIndex, words.length - 1));
-      console.log("[SYNC INDEX] Index out of bounds, correcting:", { 
-        currentIndex, 
-        wordsLength: words.length, 
-        newIndex 
-      });
       setCurrentIndex(newIndex);
     }
   }, [words.length, currentIndex]);
-  
-  // CRITICAL: Recalculate isSaved and isCompleted on every render with current word
-  // Now using Array state, so React will detect changes properly
-  // Create sorted string for key generation - use length and join for reliable comparison
-  const savedWordIdsKey = `${savedWordIds.length}-${[...savedWordIds].sort().join(',')}`;
-  const completedWordIdsKey = `${completedWordIds.length}-${[...completedWordIds].sort().join(',')}`;
-  
-  // CRITICAL: Calculate isSaved and isCompleted directly from arrays
-  // Calculate on every render to ensure we always have the latest state
+
   const isSaved = currentWord ? savedWordIds.includes(currentWord.id) : false;
   const isCompleted = currentWord ? completedWordIds.includes(currentWord.id) : false;
-  
-  // Force log on every render to see state changes
-  console.log("[CALC] isSaved/isCompleted calculated:", {
-    currentWordId: currentWord?.id,
-    isSaved,
-    isCompleted,
-    savedWordIds: [...savedWordIds],
-    completedWordIds: [...completedWordIds],
-    savedCount: savedWordIds.length,
-    completedCount: completedWordIds.length,
-    savedWordIdsKey,
-    completedWordIdsKey
-  });
-  
-  // Log for debugging
-  useEffect(() => {
-    if (currentWord) {
-      console.log("[IS_SAVED] Recalculated:", { 
-        wordId: currentWord.id, 
-        isSaved, 
-        savedWordIds: [...savedWordIds], 
-        savedWordIdsKey,
-        includes: savedWordIds.includes(currentWord.id)
-      });
-      console.log("[IS_COMPLETED] Recalculated:", { 
-        wordId: currentWord.id, 
-        isCompleted, 
-        completedWordIds: [...completedWordIds], 
-        completedWordIdsKey,
-        includes: completedWordIds.includes(currentWord.id)
-      });
-    }
-  }, [currentWord?.id, isSaved, isCompleted, savedWordIdsKey, completedWordIdsKey]);
-  
-  // Calculate counter values
+
   const savedCount = savedWordIds.length;
   const completedCount = completedWordIds.length;
 
-  // CRITICAL: Sync state changes to localStorage cache
-  // This ensures progress is persisted even when navigating away
   useEffect(() => {
     if (activePlan && savedWordIds.length >= 0) {
       const cacheKey = `${CACHE_KEY_SAVED}_${activePlan.id}`;
       setCachedWordIds(cacheKey, savedWordIds);
-      console.log("[CACHE SYNC] Saved words cached:", savedWordIds.length);
     }
   }, [savedWordIds, activePlan?.id]);
 
@@ -884,49 +582,16 @@ export const FlashcardSession: React.FC = () => {
     if (activePlan && completedWordIds.length >= 0) {
       const cacheKey = `${CACHE_KEY_COMPLETED}_${activePlan.id}`;
       setCachedWordIds(cacheKey, completedWordIds);
-      console.log("[CACHE SYNC] Completed words cached:", completedWordIds.length);
     }
   }, [completedWordIds, activePlan?.id]);
 
-  // Debug logging - log whenever currentWord or state changes
-  useEffect(() => {
-    if (currentWord) {
-      const savedHasWord = savedWordIds.includes(currentWord.id);
-      const completedHasWord = completedWordIds.includes(currentWord.id);
-      console.log("[RENDER] State check:", {
-        wordId: currentWord.id,
-        english: currentWord.english,
-        isSaved,
-        isCompleted,
-        savedHasWord,
-        completedHasWord,
-        savedSize: savedWordIds.length,
-        completedSize: completedWordIds.length,
-        currentIndex,
-        wordsLength: words.length
-      });
-      
-      // Also log in paginate format for consistency
-      console.log("[PAGINATE] Current word state:", {
-        wordId: currentWord.id,
-        isCurrentlySaved: savedHasWord,
-        isCurrentlyCompleted: completedHasWord,
-        savedSize: savedWordIds.length,
-        completedSize: completedWordIds.length
-      });
-    }
-  }, [currentWord?.id, isSaved, isCompleted, savedWordIds.length, completedWordIds.length, currentIndex, words.length]);
-  
-  // Sync currentIndex if it's out of bounds
   useEffect(() => {
     if (words.length > 0 && currentIndex >= words.length) {
       setCurrentIndex(Math.max(0, words.length - 1));
     }
   }, [words.length, currentIndex]);
 
-  // Show loading state or empty state
   if (isLoading || words.length === 0) {
-    // Check if all words are completed (only if not in review mode and not currently loading)
     if (!isLoading && words.length === 0 && completedWordIds.length > 0 && !isReviewMode) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
@@ -948,7 +613,6 @@ export const FlashcardSession: React.FC = () => {
       );
     }
 
-    // Review mode: all review cards completed
     if (!isLoading && words.length === 0 && isReviewMode) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center px-4">
@@ -974,7 +638,6 @@ export const FlashcardSession: React.FC = () => {
       );
     }
 
-    // No words available for this language pair
     if (!isLoading && words.length === 0 && completedWordIds.length === 0 && !isReviewMode) {
       const sourceLang = activePlan ? getLanguageByCode(activePlan.sourceLanguage) : null;
       const targetLang = activePlan ? getLanguageByCode(activePlan.targetLanguage) : null;
@@ -992,14 +655,14 @@ export const FlashcardSession: React.FC = () => {
               <div className="mb-6">
                 <div className="flex items-center justify-center gap-3 mb-3">
                   <span className="text-3xl">{sourceLang.flag}</span>
-                  <span className="text-slate-500">→</span>
+                  <span className="text-slate-500">-</span>
                   <span className="text-3xl">{targetLang.flag}</span>
                 </div>
                 <p className="text-slate-400">
-                  Currently, only <span className="text-neon-cyan">English → Turkish</span> vocabulary is available.
+                  Currently, only <span className="text-neon-cyan">English - Turkish</span> vocabulary is available.
                 </p>
                 <p className="text-slate-500 text-sm mt-2">
-                  Create a new plan with English → Turkish to start learning.
+                  Create a new plan with English - Turkish to start learning.
                 </p>
               </div>
             ) : (
@@ -1014,8 +677,7 @@ export const FlashcardSession: React.FC = () => {
         </div>
       );
     }
-    
-    // GENTLE LOADING - Single breathing card, minimal and calm
+
     return (
       <div className="min-h-screen flex items-center justify-center text-white">
                 <motion.div
@@ -1024,7 +686,6 @@ export const FlashcardSession: React.FC = () => {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4 }}
         >
-          {/* Single Breathing Card */}
           <motion.div
             className="w-72 h-96 mx-auto mb-8 rounded-3xl border backdrop-blur-xl flex items-center justify-center"
             style={{
@@ -1042,7 +703,6 @@ export const FlashcardSession: React.FC = () => {
               ease: "easeInOut",
             }}
           >
-            {/* Subtle inner glow */}
             <motion.div
               className="w-16 h-16 rounded-full"
               style={{
@@ -1060,7 +720,6 @@ export const FlashcardSession: React.FC = () => {
             />
           </motion.div>
 
-          {/* Simple text */}
           <motion.p
             className="text-slate-400 text-sm"
             animate={{ opacity: [0.5, 0.8, 0.5] }}
@@ -1075,9 +734,8 @@ export const FlashcardSession: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col overflow-hidden">
-      
+
       <main className="flex-1 flex flex-col items-center justify-center px-4 pt-20 pb-32 relative">
-        {/* Minimal Progress Bar */}
         <div className="absolute top-24 left-0 w-full flex justify-center z-10">
           <motion.div
             className="flex items-center gap-6 px-6 py-3 rounded-2xl bg-slate-900/60 backdrop-blur-xl border border-white/5"
@@ -1110,7 +768,6 @@ export const FlashcardSession: React.FC = () => {
           )}
         </div>
 
-        {/* Floating Control Bar - Fixed at bottom, centered */}
         <motion.div
           className="fixed bottom-8 left-0 right-0 z-50 flex justify-center px-4"
           initial={{ y: 100, opacity: 0 }}
@@ -1119,7 +776,6 @@ export const FlashcardSession: React.FC = () => {
         >
           <div className="flex flex-col items-center">
             <div className="flex items-center p-1.5 rounded-2xl bg-slate-900/90 backdrop-blur-2xl border border-white/10 shadow-2xl shadow-black/50">
-              {/* Skip/Previous */}
               <motion.button
                 onClick={() => words.length > 0 && paginate(-1)}
                 disabled={words.length === 0}
@@ -1131,7 +787,6 @@ export const FlashcardSession: React.FC = () => {
                 <span className="text-[9px] font-medium uppercase tracking-wider">Skip</span>
               </motion.button>
 
-              {/* Save for Later */}
               <motion.button
                 onClick={() => toggleSaveWord()}
                 disabled={isSaving || isCompleting || !currentWord}
@@ -1152,7 +807,6 @@ export const FlashcardSession: React.FC = () => {
                 <span className="text-[9px] font-medium uppercase tracking-wider">Save</span>
               </motion.button>
 
-              {/* Know It - Primary Action */}
               <motion.button
                 onClick={() => {
                   if (!isCompleted) {
@@ -1179,7 +833,6 @@ export const FlashcardSession: React.FC = () => {
                 </span>
               </motion.button>
 
-              {/* Next */}
               <motion.button
                 onClick={() => words.length > 0 && paginate(1)}
                 disabled={words.length === 0}
