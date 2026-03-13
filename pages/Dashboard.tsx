@@ -87,8 +87,8 @@ export const Dashboard: React.FC = () => {
           setCachedWordsForPlan(cacheKey, words);
           setSavedWords(words);
         })
-        .catch(() => {
-          // Background sync failed - UI is already showing
+        .catch((err) => {
+          console.error('Dashboard background sync failed:', err);
         });
     };
 
@@ -104,8 +104,8 @@ export const Dashboard: React.FC = () => {
       // Update cache after removal
       const cacheKey = `${CACHE_KEY_DASHBOARD}_${activePlan.id}`;
       setCachedWordsForPlan(cacheKey, updatedWords);
-    } catch {
-      // Failed to remove word
+    } catch (err) {
+      console.error('Failed to remove word:', err);
     }
   };
 

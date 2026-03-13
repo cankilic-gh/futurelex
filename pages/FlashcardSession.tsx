@@ -269,8 +269,8 @@ export const FlashcardSession: React.FC = () => {
             );
             setWords(pool);
           }
-        }).catch(() => {
-          // Background sync failed - UI is already showing
+        }).catch((err) => {
+          console.error('Background word sync failed:', err);
         });
       } catch {
         if (!isReviewMode && activePlan) {
@@ -342,7 +342,7 @@ export const FlashcardSession: React.FC = () => {
         english: currentWord.english || currentWord.sourceText,
         turkish: currentWord.turkish || currentWord.targetText,
         completedAt: serverTimestamp()
-      }, { merge: true }).catch(() => {});
+      }, { merge: true }).catch((err) => console.error('Failed to sync completed word:', err));
     } else if (isCurrentlySaved && user && activePlan) {
       const savedWordRef = doc(db, 'users', user.uid, 'plans', activePlan.id, 'saved_words', currentWord.id);
       const wordData: any = {
@@ -362,7 +362,7 @@ export const FlashcardSession: React.FC = () => {
       if (currentWord.pronunciation) {
         wordData.pronunciation = currentWord.pronunciation;
       }
-      setDoc(savedWordRef, wordData, { merge: true }).catch(() => {});
+      setDoc(savedWordRef, wordData, { merge: true }).catch((err) => console.error('Failed to sync saved word:', err));
     }
 
     let nextIndex = currentIndex + newDirection;
@@ -416,7 +416,8 @@ export const FlashcardSession: React.FC = () => {
 
         resetLoading();
 
-        deleteDoc(wordRef).catch(() => {
+        deleteDoc(wordRef).catch((err) => {
+          console.error('Failed to unsave word:', err);
           setSavedWordIds(prev => {
             if (!prev.includes(word.id)) {
               return [...prev, word.id];
@@ -441,7 +442,7 @@ export const FlashcardSession: React.FC = () => {
 
         if (completedWordIds.includes(word.id)) {
           setCompletedWordIds(prev => prev.filter(id => id !== word.id));
-          deleteDoc(completedWordRef).catch(() => {});
+          deleteDoc(completedWordRef).catch((err) => console.error('Failed to remove completed status:', err));
         }
 
         const wordData: any = {
@@ -466,7 +467,8 @@ export const FlashcardSession: React.FC = () => {
         resetLoading();
 
         setDoc(wordRef, wordData)
-          .catch(() => {
+          .catch((err) => {
+            console.error('Failed to save word:', err);
             setSavedWordIds(prev => prev.filter(id => id !== word.id));
           });
       }
@@ -506,7 +508,8 @@ export const FlashcardSession: React.FC = () => {
           return prev;
         });
 
-        deleteDoc(wordRef).catch(() => {
+        deleteDoc(wordRef).catch((err) => {
+          console.error('Failed to uncomplete word:', err);
           setCompletedWordIds(prev => {
             if (!prev.includes(word.id)) {
               return [...prev, word.id];
@@ -525,7 +528,7 @@ export const FlashcardSession: React.FC = () => {
         if (savedWordIds.includes(word.id)) {
           setSavedWordIds(prev => prev.filter(id => id !== word.id));
           removeWordFromDashboardCache(activePlan.id, word.id);
-          deleteDoc(savedWordRef).catch(() => {});
+          deleteDoc(savedWordRef).catch((err) => console.error('Failed to remove saved status:', err));
         }
 
         const completedData = {
@@ -542,7 +545,8 @@ export const FlashcardSession: React.FC = () => {
         resetLoading();
 
         setDoc(wordRef, completedData)
-          .catch(() => {
+          .catch((err) => {
+            console.error('Failed to complete word:', err);
             setCompletedWordIds(prev => prev.filter(id => id !== word.id));
           });
       }

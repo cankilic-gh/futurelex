@@ -116,7 +116,9 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // If we had to use fallback (first plan), update Firebase in background
         if (active && !loadedPlans.find(p => p.isActive) && loadedPlans.length > 0) {
           const planRef = doc(db, 'users', user.uid, 'plans', active.id);
-          updateDoc(planRef, { isActive: true }).catch(() => {});
+          updateDoc(planRef, { isActive: true }).catch((err) => {
+            console.error('Failed to set fallback active plan:', err);
+          });
         }
       } catch (err) {
         console.error('Failed to load plans:', err);
@@ -230,13 +232,20 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Firebase operations in background (don't await)
     const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
-    deleteDoc(planDocRef).catch(() => {});
+    const deletedPlan = plans.find(p => p.id === planId);
+    deleteDoc(planDocRef).catch((err) => {
+      console.error('Failed to delete plan from cloud:', err);
+      // Rollback: re-add the plan
+      if (deletedPlan) setPlans(prev => [...prev, deletedPlan]);
+    });
 
     // Update active state for remaining plans in background
     if (wasActive && remainingPlans.length > 0) {
       remainingPlans.forEach(plan => {
         const planRef = doc(db, 'users', user.uid, 'plans', plan.id);
-        updateDoc(planRef, { isActive: plan.id === remainingPlans[0].id }).catch(() => {});
+        updateDoc(planRef, { isActive: plan.id === remainingPlans[0].id }).catch((err) => {
+          console.error('Failed to update plan active state:', err);
+        });
       });
     }
   };
@@ -279,8 +288,8 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const active = loadedPlans.find(p => p.isActive) || null;
       setActivePlanState(active);
-    } catch {
-      // Error refreshing plans
+    } catch (err) {
+      console.error('Failed to refresh plans:', err);
     }
   };
 
@@ -307,7 +316,9 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const planRef = doc(db, 'users', user.uid, 'plans', planId);
     updateDoc(planRef, {
       progress: { ...plans.find(p => p.id === planId)?.progress, ...progress }
-    }).catch(() => {});
+    }).catch((err) => {
+      console.error('Failed to sync plan progress:', err);
+    });
   };
 
   // isReady is true when auth is loaded and (user has plans OR no user)
