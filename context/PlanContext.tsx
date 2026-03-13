@@ -118,8 +118,8 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const planRef = doc(db, 'users', user.uid, 'plans', active.id);
           updateDoc(planRef, { isActive: true }).catch(() => {});
         }
-      } catch {
-        // Error loading plans
+      } catch (err) {
+        console.error('Failed to load plans:', err);
       } finally {
         setLoading(false);
         clearTimeout(safetyTimeout);
@@ -197,7 +197,12 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentLevel: 1,
         totalWords: 0,
       },
-    }).catch(() => {}).finally(() => {
+    }).catch((err) => {
+      console.error('Failed to save plan to cloud:', err);
+      // Mark plan as not synced so user knows
+      const failedPlan = { ...newPlan, syncError: true };
+      setPlans(prev => prev.map(p => p.id === planId ? failedPlan as LearningPlan : p));
+    }).finally(() => {
       isCreatingPlanRef.current = false;
     });
 
