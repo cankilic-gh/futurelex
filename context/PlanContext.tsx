@@ -1,16 +1,16 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { useAuth } from './AuthContext';
 import { db } from '../services/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
+import {
+  collection,
+  query,
+  where,
+  getDocs,
   getDocsFromServer,
   getDoc,
-  addDoc, 
-  deleteDoc, 
-  doc, 
+  addDoc,
+  deleteDoc,
+  doc,
   updateDoc,
   setDoc,
   serverTimestamp,
@@ -19,6 +19,7 @@ import {
 import { LearningPlan } from '../types';
 import { generatePlanName, isValidLanguagePair } from '../services/languages';
 import { needsMigration, migrateUserToPlans } from '../services/migration';
+import { LocalStorage } from '../services/localStorage';
 
 interface PlanContextType {
   activePlan: LearningPlan | null;
@@ -38,6 +39,12 @@ export const usePlan = () => {
   const context = useContext(PlanContext);
   if (!context) throw new Error("usePlan must be used within a PlanProvider");
   return context;
+};
+
+// Helper: backup plans + active plan to localStorage
+const backupToLocal = (plans: LearningPlan[], activePlan: LearningPlan | null) => {
+  LocalStorage.savePlans(plans);
+  LocalStorage.setActivePlanId(activePlan?.id || null);
 };
 
 export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -105,6 +112,7 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
             setPlans(plansAfterMigration);
             const active = plansAfterMigration.find(p => p.isActive) || plansAfterMigration[0] || null;
             setActivePlanState(active);
+            backupToLocal(plansAfterMigration, active);
             return;
           }
         }
@@ -112,6 +120,10 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setPlans(loadedPlans);
         const active = loadedPlans.find(p => p.isActive) || loadedPlans[0] || null;
         setActivePlanState(active);
+
+        // Backup to localStorage after successful Firestore load
+        backupToLocal(loadedPlans, active);
+        LocalStorage.setLastSync();
 
         // If we had to use fallback (first plan), update Firebase in background
         if (active && !loadedPlans.find(p => p.isActive) && loadedPlans.length > 0) {
@@ -121,7 +133,16 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
           });
         }
       } catch (err) {
-        console.error('Failed to load plans:', err);
+        console.error('Failed to load plans from Firestore:', err);
+
+        // FALLBACK: Load from localStorage if Firestore fails
+        const cachedPlans = LocalStorage.getPlans();
+        if (cachedPlans.length > 0) {
+          console.warn('Using cached plans from localStorage');
+          setPlans(cachedPlans);
+          const cachedActive = LocalStorage.getActivePlan();
+          setActivePlanState(cachedActive);
+        }
       } finally {
         setLoading(false);
         clearTimeout(safetyTimeout);
@@ -185,6 +206,9 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActivePlanState(newPlan);
     }
 
+    // Backup to localStorage immediately (safety net)
+    backupToLocal(updatedPlans, isFirstPlan ? newPlan : activePlan);
+
     // Firebase operation in background (don't await)
     const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
     setDoc(planDocRef, {
@@ -199,11 +223,12 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
         currentLevel: 1,
         totalWords: 0,
       },
+    }).then(() => {
+      LocalStorage.setLastSync();
     }).catch((err) => {
       console.error('Failed to save plan to cloud:', err);
-      // Mark plan as not synced so user knows
-      const failedPlan = { ...newPlan, syncError: true };
-      setPlans(prev => prev.map(p => p.id === planId ? failedPlan as LearningPlan : p));
+      // Plan is safe in localStorage — mark pending sync
+      LocalStorage.markPendingSync({ type: 'create_plan', data: newPlan });
     }).finally(() => {
       isCreatingPlanRef.current = false;
     });
@@ -219,6 +244,7 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // Calculate remaining plans
     const remainingPlans = plans.filter(p => p.id !== planId);
     const wasActive = activePlan?.id === planId;
+    const deletedPlan = plans.find(p => p.id === planId);
 
     // OPTIMISTIC UI: Update local state immediately
     setPlans(remainingPlans);
@@ -230,13 +256,19 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setActivePlanState(null);
     }
 
+    // Backup updated state to localStorage
+    const newActive = wasActive ? (remainingPlans[0] || null) : activePlan;
+    backupToLocal(remainingPlans, newActive);
+
     // Firebase operations in background (don't await)
     const planDocRef = doc(db, 'users', user.uid, 'plans', planId);
-    const deletedPlan = plans.find(p => p.id === planId);
     deleteDoc(planDocRef).catch((err) => {
       console.error('Failed to delete plan from cloud:', err);
-      // Rollback: re-add the plan
-      if (deletedPlan) setPlans(prev => [...prev, deletedPlan]);
+      // Rollback: re-add the plan to state and localStorage
+      if (deletedPlan) {
+        setPlans(prev => [...prev, deletedPlan]);
+        LocalStorage.addPlan(deletedPlan);
+      }
     });
 
     // Update active state for remaining plans in background
@@ -253,23 +285,23 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const setActivePlan = async (planId: string): Promise<void> => {
     if (!user) throw new Error('User must be logged in');
 
+    // Update local state + localStorage immediately (optimistic)
+    const newActivePlan = plans.find(p => p.id === planId) || null;
+    const updatedPlans = plans.map(p => ({ ...p, isActive: p.id === planId }));
+    setActivePlanState(newActivePlan);
+    setPlans(updatedPlans);
+    backupToLocal(updatedPlans, newActivePlan);
+
     try {
-      // Update all plans: set the selected one as active, others as inactive
+      // Sync to Firebase
       const updates = plans.map(plan => {
         const planRef = doc(db, 'users', user.uid, 'plans', plan.id);
-        return updateDoc(planRef, {
-          isActive: plan.id === planId,
-        });
+        return updateDoc(planRef, { isActive: plan.id === planId });
       });
-
       await Promise.all(updates);
-
-      // Update local state
-      const newActivePlan = plans.find(p => p.id === planId) || null;
-      setActivePlanState(newActivePlan);
-      setPlans(prev => prev.map(p => ({ ...p, isActive: p.id === planId })));
     } catch (error) {
-      throw error;
+      console.error('Failed to sync active plan to cloud:', error);
+      // Local state and localStorage already updated — data is safe
     }
   };
 
@@ -285,9 +317,12 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } as LearningPlan));
 
       setPlans(loadedPlans);
-
       const active = loadedPlans.find(p => p.isActive) || null;
       setActivePlanState(active);
+
+      // Backup fresh data to localStorage
+      backupToLocal(loadedPlans, active);
+      LocalStorage.setLastSync();
     } catch (err) {
       console.error('Failed to refresh plans:', err);
     }
@@ -308,11 +343,17 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPlans(newPlans);
 
     // Update active plan if it's the one being updated
+    const newActive = activePlan?.id === planId
+      ? { ...activePlan, progress: { ...activePlan.progress, ...progress } }
+      : activePlan;
     if (activePlan?.id === planId) {
-      setActivePlanState(prev => prev ? { ...prev, progress: { ...prev.progress, ...progress } } : null);
+      setActivePlanState(newActive);
     }
 
-    // Sync to Firebase in background (fire and forget)
+    // Backup progress to localStorage
+    backupToLocal(newPlans, newActive);
+
+    // Sync to Firebase in background
     const planRef = doc(db, 'users', user.uid, 'plans', planId);
     updateDoc(planRef, {
       progress: { ...plans.find(p => p.id === planId)?.progress, ...progress }
@@ -342,4 +383,3 @@ export const PlanProvider: React.FC<{ children: React.ReactNode }> = ({ children
     </PlanContext.Provider>
   );
 };
-
