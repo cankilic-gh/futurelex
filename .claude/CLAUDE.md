@@ -163,3 +163,29 @@ npm run preview  # Preview production build
 - Don't remove `--legacy-peer-deps` from vercel.json -- React 19 has peer dep conflicts
 - Don't await Firebase writes in optimistic update flows -- they must be fire-and-forget
 - Don't remove the migration service -- existing users may still need one-time migration
+
+
+## TheGridBase Agent System
+
+This project is part of the TheGridBase portfolio managed by a 29-agent orchestration system. When working on complex tasks, spawn specialized agents:
+
+| Task | Agent | Trigger |
+|------|-------|---------|
+| Frontend/UI | `craftsman` | React, Tailwind, animations |
+| Database | `oracle` | Schema, queries, migrations |
+| Security | `sentinel` | Auth, OWASP, vulnerability |
+| Testing | `tester` | Unit/integration tests |
+| E2E/A11y | `qa` | Playwright, WCAG audits |
+| Deploy | `deployer` | Vercel, CI/CD, DNS |
+| Performance | `auditor` | Lighthouse, Core Web Vitals |
+| Multi-file | `composer` | Cross-module refactoring |
+| Architecture | `architect` | System design, planning |
+| Git ops | `refinery` | Merge conflicts, rebasing |
+
+Agent definitions: `~/.claude/agents/` | Full system: `MASTER_CONTROL.md`
+
+**Rules:**
+- Simple tasks: handle directly, no agent needed
+- Complex multi-domain tasks: spawn multiple agents in parallel
+- All code changes must follow VBR (Verify-Before-Report) protocol
+- Turkish explanations, English code/commits
